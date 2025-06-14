@@ -21,6 +21,7 @@ export default function RootLayout() {
           <Stack.Screen name="auth/register" />
           <Stack.Screen name="dashboard/rider" />
           <Stack.Screen name="dashboard/driver" />
+          <Stack.Screen name="buses/my-buses" />
         </Stack>
         <ThemedStatusBar />
       </AuthProvider>

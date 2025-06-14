@@ -1,10 +1,10 @@
 import { useRouter } from 'expo-router';
 import {
-    User,
-    createUserWithEmailAndPassword,
-    onAuthStateChanged,
-    signInWithEmailAndPassword,
-    signOut
+  User,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -88,12 +88,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Login successful');
       // Redirect after successful login
       router.replace('/');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      if (error.code === 'auth/invalid-credential') {
-        throw new Error('Invalid email or password. Please check your credentials.');
+      
+      // Enhanced error handling with specific Firebase error codes
+      switch (error.code) {
+        case 'auth/invalid-credential':
+          throw new Error('Invalid email or password. Please check your credentials and try again.');
+        case 'auth/user-not-found':
+          throw new Error('No account found with this email address. Please check your email or sign up.');
+        case 'auth/wrong-password':
+          throw new Error('Incorrect password. Please try again.');
+        case 'auth/invalid-email':
+          throw new Error('Please enter a valid email address.');
+        case 'auth/user-disabled':
+          throw new Error('This account has been disabled. Please contact support.');
+        case 'auth/too-many-requests':
+          throw new Error('Too many failed login attempts. Please try again later.');
+        case 'auth/network-request-failed':
+          throw new Error('Network error. Please check your internet connection and try again.');
+        case 'auth/operation-not-allowed':
+          throw new Error('Email/password sign-in is not enabled. Please contact support.');
+        case 'auth/weak-password':
+          throw new Error('Password is too weak. Please choose a stronger password.');
+        default:
+          throw new Error('Login failed. Please try again or contact support if the problem persists.');
       }
-      throw error;
     } finally {
       setLoading(false);
     }
@@ -126,9 +146,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Redirect after successful registration
       router.replace('/');
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Registration error:', error);
-      throw error;
+      
+      // Enhanced error handling for registration
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          throw new Error('An account with this email already exists. Please sign in instead.');
+        case 'auth/invalid-email':
+          throw new Error('Please enter a valid email address.');
+        case 'auth/weak-password':
+          throw new Error('Password is too weak. Please choose a stronger password (at least 6 characters).');
+        case 'auth/network-request-failed':
+          throw new Error('Network error. Please check your internet connection and try again.');
+        case 'auth/operation-not-allowed':
+          throw new Error('Account creation is not enabled. Please contact support.');
+        default:
+          throw new Error('Registration failed. Please try again or contact support if the problem persists.');
+      }
     } finally {
       setLoading(false);
     }
@@ -138,9 +173,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       await signOut(auth);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Logout error:', error);
-      throw error;
+      throw new Error('Failed to sign out. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -156,4 +191,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}; 
+};

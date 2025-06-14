@@ -1,11 +1,11 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { MainLayout } from '../../layouts/MainLayout';
-import { DriverDashboard } from '../../screens/dashboard/DriverDashboard';
+import { MyBusesScreen } from '../../screens/buses/MyBusesScreen';
 
-export default function DriverDashboardRoute() {
+export default function MyBusesRoute() {
   const router = useRouter();
-  const [currentRoute, setCurrentRoute] = useState('dashboard');
+  const [currentRoute, setCurrentRoute] = useState('my-buses');
 
   const handleNavigate = (route: string) => {
     setCurrentRoute(route);
@@ -13,10 +13,10 @@ export default function DriverDashboardRoute() {
     // Handle navigation to different sections
     switch (route) {
       case 'dashboard':
-        // Already on dashboard, just update state
+        router.push('/dashboard/driver');
         break;
       case 'my-buses':
-        router.push('/buses/my-buses');
+        // Already on this page
         break;
       case 'riders':
         // Navigate to riders page (to be implemented)
@@ -29,11 +29,11 @@ export default function DriverDashboardRoute() {
 
   return (
     <MainLayout
-      title="Driver Dashboard"
+      title="My Buses"
       currentRoute={currentRoute}
       onNavigate={handleNavigate}
     >
-      <DriverDashboard />
+      <MyBusesScreen />
     </MainLayout>
   );
 } 

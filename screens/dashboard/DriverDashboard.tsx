@@ -2,13 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { MapComponent } from '../../components/map/MapComponent';
 import { db } from '../../config/firebase';
@@ -79,6 +81,7 @@ export const DriverDashboard: React.FC = () => {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchDriverBuses = useCallback(async () => {
     if (!userData?.uid) return [];
@@ -102,7 +105,7 @@ export const DriverDashboard: React.FC = () => {
       return driverBuses;
     } catch (error) {
       console.error('Error fetching driver buses:', error);
-      return [];
+      throw new Error('Failed to load your buses. Please try again.');
     }
   }, [userData?.uid]);
 
@@ -209,6 +212,7 @@ export const DriverDashboard: React.FC = () => {
 
     try {
       console.log('📊 Fetching driver dashboard data...');
+      setError(null);
       
       const driverBuses = await fetchDriverBuses();
       setBuses(driverBuses);
@@ -227,8 +231,25 @@ export const DriverDashboard: React.FC = () => {
         activities: activities.length
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching driver dashboard data:', error);
+      setError(error.message || 'Failed to load dashboard data');
+      
+      // Show user-friendly error alert
+      Alert.alert(
+        'Error Loading Dashboard',
+        error.message || 'Failed to load dashboard data. Please try again.',
+        [
+          {
+            text: 'Retry',
+            onPress: () => fetchDashboardData()
+          },
+          {
+            text: 'OK',
+            style: 'cancel'
+          }
+        ]
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -302,6 +323,29 @@ export const DriverDashboard: React.FC = () => {
         <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
           Loading dashboard...
         </Text>
+      </View>
+    );
+  }
+
+  // Error state
+  if (error && !refreshing) {
+    return (
+      <View style={[styles.errorContainer, { backgroundColor: colors.background }]}>
+        <Ionicons name="alert-circle" size={64} color={colors.error} />
+        <Text style={[styles.errorTitle, { color: colors.text }]}>
+          Oops! Something went wrong
+        </Text>
+        <Text style={[styles.errorMessage, { color: colors.textSecondary }]}>
+          {error}
+        </Text>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          onPress={fetchDashboardData}
+        >
+          <Text style={[styles.retryButtonText, { color: colors.textInverse }]}>
+            Try Again
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -541,6 +585,33 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: AppSpacing.md,
     fontSize: AppFontSizes.md,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: AppSpacing.lg,
+  },
+  errorTitle: {
+    fontSize: AppFontSizes.xl,
+    fontWeight: 'bold',
+    marginTop: AppSpacing.md,
+    marginBottom: AppSpacing.sm,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: AppFontSizes.md,
+    textAlign: 'center',
+    marginBottom: AppSpacing.lg,
+  },
+  retryButton: {
+    paddingHorizontal: AppSpacing.lg,
+    paddingVertical: AppSpacing.md,
+    borderRadius: AppBorderRadius.md,
+  },
+  retryButtonText: {
+    fontSize: AppFontSizes.md,
+    fontWeight: '600',
   },
   welcomeSection: {
     padding: AppSpacing.lg,

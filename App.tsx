@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FavoritesProvider } from './contexts/FavoritesContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { MainLayout } from './layouts/MainLayout';
 import { LoginScreen } from './screens/auth/LoginScreen';
 import { RegisterScreen } from './screens/auth/RegisterScreen';
@@ -130,9 +132,13 @@ const AppContent: React.FC = () => {
 export default function App() {
   return (
     <AuthProvider>
-      <FavoritesProvider>
-        <AppContent />
-      </FavoritesProvider>
+      <ToastProvider>
+        <ThemeProvider>
+          <FavoritesProvider>
+            <AppContent />
+          </FavoritesProvider>
+        </ThemeProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }
