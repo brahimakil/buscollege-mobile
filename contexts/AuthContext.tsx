@@ -84,10 +84,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log('Attempting login for:', email);
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
       console.log('Login successful');
-      // Redirect after successful login
-      router.replace('/');
+      
+      // Wait for user data to be loaded
+      const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as UserData;
+        console.log('User data loaded, redirecting based on role:', userData.role);
+        
+        // Direct redirect based on role
+        if (userData.role === 'driver') {
+          router.replace('/dashboard/driver');
+        } else if (userData.role === 'rider') {
+          router.replace('/dashboard/rider');
+        } else {
+          router.replace('/');
+        }
+      } else {
+        console.log('No user document found, redirecting to index');
+        router.replace('/');
+      }
     } catch (error: any) {
       console.error('Login error:', error);
       

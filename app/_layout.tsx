@@ -17,11 +17,10 @@ export default function RootLayout() {
       <AuthProvider>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
-          <Stack.Screen name="auth/login" />
-          <Stack.Screen name="auth/register" />
-          <Stack.Screen name="dashboard/rider" />
-          <Stack.Screen name="dashboard/driver" />
-          <Stack.Screen name="buses/my-buses" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="signup" />
+          <Stack.Screen name="driver-dashboard" />
+          <Stack.Screen name="rider-dashboard" />
         </Stack>
         <ThemedStatusBar />
       </AuthProvider>

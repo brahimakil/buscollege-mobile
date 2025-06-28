@@ -1,13 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef } from 'react';
 import {
-    Animated,
-    Dimensions,
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Animated,
+  Dimensions,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { AppBorderRadius, AppColors, AppFontSizes, AppSpacing } from '../../themes/colors';
 

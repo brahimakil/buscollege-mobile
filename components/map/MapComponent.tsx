@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { AppBorderRadius, AppColors, AppFontSizes, AppSpacing } from '../../themes/colors';
@@ -17,7 +18,7 @@ interface BusRoute {
 }
 
 interface MapComponentProps {
-  routes: BusRoute[];
+  routes?: BusRoute[];
   height?: number;
   centerLat?: number;
   centerLng?: number;
@@ -26,7 +27,7 @@ interface MapComponentProps {
 
 // Web Map Component using direct DOM manipulation
 const WebMapComponent: React.FC<MapComponentProps> = ({ 
-  routes, 
+  routes = [],
   height = 300, 
   centerLat = 33.8547, 
   centerLng = 35.8623, 
@@ -41,12 +42,12 @@ const WebMapComponent: React.FC<MapComponentProps> = ({
     const colors = ['#6366F1', '#EC4899', '#10B981', '#F59E0B', '#8B5CF6'];
     
     // Filter and validate routes
-    const validRoutes = routes
+    const validRoutes = (routes || [])
       .filter(route => route && route.locations && Array.isArray(route.locations))
       .map((route, index) => ({
         ...route,
         color: route.color || colors[index % colors.length],
-        locations: route.locations.filter(loc => 
+        locations: (route.locations || []).filter(loc => 
           loc && 
           typeof loc.latitude === 'number' && 
           typeof loc.longitude === 'number' &&
@@ -234,7 +235,7 @@ const WebMapComponent: React.FC<MapComponentProps> = ({
         mapRef.current.removeChild(iframe);
       }
     };
-  }, [routes, height, centerLat, centerLng, zoom]);
+  }, [routes, height, centerLat, centerLng, zoom, mapId]);
 
   return (
     <div 
@@ -251,56 +252,22 @@ const WebMapComponent: React.FC<MapComponentProps> = ({
 };
 
 // Native Map Component (placeholder for mobile)
-const NativeMapComponent: React.FC<MapComponentProps> = ({ routes, height = 300 }) => {
-  const validRoutes = routes.filter(route => 
-    route && route.locations && Array.isArray(route.locations) && route.locations.length > 0
-  );
-
+const NativeMapComponent: React.FC<MapComponentProps> = ({ routes = [], height = 300 }) => {
+  // Add null check here too if there's any filtering logic
   return (
-    <View style={[styles.mapContainer, { height }]}>
-      <Text style={styles.mapPlaceholder}>Bus Routes Map</Text>
-      <Text style={styles.mapSubtext}>
-        {validRoutes.length > 0 
-          ? `Showing ${validRoutes.length} route${validRoutes.length > 1 ? 's' : ''}`
-          : 'No routes available'
-        }
-      </Text>
-      
-      {validRoutes.length > 0 && (
-        <View style={styles.routesList}>
-          {validRoutes.slice(0, 3).map((route, index) => {
-            const validLocations = route.locations.filter(loc => 
-              loc && loc.name && typeof loc.latitude === 'number' && typeof loc.longitude === 'number'
-            );
-            
-            return (
-              <View key={route.id || index} style={styles.routeItem}>
-                <View style={[styles.routeColor, { backgroundColor: route.color || '#6366F1' }]} />
-                <View style={styles.routeInfo}>
-                  <Text style={styles.routeName}>{route.name || 'Unknown Route'}</Text>
-                  <Text style={styles.routeStops}>
-                    {validLocations.length} stop{validLocations.length !== 1 ? 's' : ''}
-                  </Text>
-                  <View style={styles.stopsContainer}>
-                    {validLocations.slice(0, 3).map((location, i) => (
-                      <Text key={i} style={styles.stopName}>
-                        {location.name}
-                        {i < Math.min(validLocations.length - 1, 2) && ' → '}
-                      </Text>
-                    ))}
-                    {validLocations.length > 3 && (
-                      <Text style={styles.moreStops}>+{validLocations.length - 3} more</Text>
-                    )}
-                  </View>
-                </View>
-              </View>
-            );
-          })}
-          {validRoutes.length > 3 && (
-            <Text style={styles.moreRoutes}>+{validRoutes.length - 3} more routes</Text>
-          )}
-        </View>
-      )}
+    <View style={[styles.container, { height }]}>
+      <View style={styles.placeholderContainer}>
+        <Ionicons name="map" size={48} color={AppColors.textTertiary} />
+        <Text style={styles.placeholderText}>
+          Map view available on web
+        </Text>
+        <Text style={styles.placeholderSubtext}>
+          {(routes || []).length > 0 
+            ? `Showing ${routes.length} route${routes.length !== 1 ? 's' : ''}`
+            : 'No routes to display'
+          }
+        </Text>
+      </View>
     </View>
   );
 };
@@ -314,7 +281,7 @@ export const MapComponent: React.FC<MapComponentProps> = (props) => {
 };
 
 const styles = StyleSheet.create({
-  mapContainer: {
+  container: {
     backgroundColor: AppColors.light.surface,
     borderRadius: AppBorderRadius.md,
     justifyContent: 'flex-start',
@@ -323,69 +290,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: AppColors.light.border,
   },
-  mapPlaceholder: {
+  placeholderContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
     fontSize: AppFontSizes.lg,
     fontWeight: 'bold',
     color: AppColors.light.text,
     marginBottom: AppSpacing.xs,
   },
-  mapSubtext: {
+  placeholderSubtext: {
     fontSize: AppFontSizes.sm,
     color: AppColors.light.textSecondary,
     marginBottom: AppSpacing.md,
-  },
-  routesList: {
-    width: '100%',
-  },
-  routeItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: AppSpacing.md,
-    paddingHorizontal: AppSpacing.md,
-    backgroundColor: AppColors.light.backgroundSecondary,
-    borderRadius: AppBorderRadius.sm,
-    marginBottom: AppSpacing.sm,
-  },
-  routeColor: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginRight: AppSpacing.md,
-    marginTop: 2,
-  },
-  routeInfo: {
-    flex: 1,
-  },
-  routeName: {
-    fontSize: AppFontSizes.md,
-    fontWeight: '600',
-    color: AppColors.light.text,
-    marginBottom: AppSpacing.xs,
-  },
-  routeStops: {
-    fontSize: AppFontSizes.sm,
-    color: AppColors.light.textSecondary,
-    marginBottom: AppSpacing.xs,
-  },
-  stopsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  stopName: {
-    fontSize: AppFontSizes.xs,
-    color: AppColors.light.textTertiary,
-  },
-  moreStops: {
-    fontSize: AppFontSizes.xs,
-    color: AppColors.light.primary,
-    fontWeight: '500',
-  },
-  moreRoutes: {
-    fontSize: AppFontSizes.sm,
-    color: AppColors.light.textTertiary,
-    textAlign: 'center',
-    marginTop: AppSpacing.sm,
-    fontStyle: 'italic',
   },
 }); 

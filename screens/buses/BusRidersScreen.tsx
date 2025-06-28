@@ -1,19 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Linking,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { db } from '../../config/firebase';
@@ -63,7 +65,14 @@ interface BusData {
   busLabel: string;
   maxCapacity: number;
   currentRiders: BusRiderObject[];
-  subscribers?: string[];
+  subscribers?: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    subscribedAt: string;
+    paymentStatus: 'paid' | 'unpaid' | 'pending';
+    status: 'active' | 'unsubscribed';
+  }>;
   pricePerMonth: number;
   pricePerRide: number;
   driverId: string;
@@ -271,21 +280,53 @@ export const BusRidersScreen: React.FC = () => {
     }
   };
 
-  const handleCallRider = (phoneNumber?: string) => {
-    if (!phoneNumber) return;
+  const handleCallRider = async (phoneNumber?: string) => {
+    if (!phoneNumber) {
+      Alert.alert('No Phone Number', 'This rider has no phone number on file.');
+      return;
+    }
     
-    if (Platform.OS === 'web') {
-      window.open(`tel:${phoneNumber}`, '_self');
-    } else {
-      console.log('Call:', phoneNumber);
+    try {
+      const phoneUrl = `tel:${phoneNumber}`;
+      const canOpen = await Linking.canOpenURL(phoneUrl);
+      
+      if (canOpen) {
+        await Linking.openURL(phoneUrl);
+      } else {
+        Alert.alert('Cannot Open Phone', 'Unable to open phone app on this device.');
+      }
+    } catch (error) {
+      console.error('Error opening phone app:', error);
+      Alert.alert('Error', 'Failed to open phone app.');
     }
   };
 
-  const handleEmailRider = (email: string) => {
-    if (Platform.OS === 'web') {
-      window.open(`mailto:${email}`, '_self');
-    } else {
-      console.log('Email:', email);
+  const handleEmailRider = async (email: string) => {
+    if (!email) {
+      Alert.alert('No Email', 'This rider has no email address.');
+      return;
+    }
+    
+    try {
+      // Try Gmail first, then fallback to default mail app
+      const gmailUrl = `googlegmail://co?to=${email}`;
+      const mailtoUrl = `mailto:${email}`;
+      
+      const canOpenGmail = await Linking.canOpenURL(gmailUrl);
+      
+      if (canOpenGmail) {
+        await Linking.openURL(gmailUrl);
+      } else {
+        const canOpenMail = await Linking.canOpenURL(mailtoUrl);
+        if (canOpenMail) {
+          await Linking.openURL(mailtoUrl);
+        } else {
+          Alert.alert('Cannot Open Email', 'No email app found on this device.');
+        }
+      }
+    } catch (error) {
+      console.error('Error opening email app:', error);
+      Alert.alert('Error', 'Failed to open email app.');
     }
   };
 
@@ -359,7 +400,6 @@ export const BusRidersScreen: React.FC = () => {
     
     setActionLoading(true);
     try {
-      // Only update the bus document - skip user document update to avoid permission errors
       const busRef = doc(db, 'buses', busId);
       const busDoc = await getDoc(busRef);
       
@@ -369,6 +409,7 @@ export const BusRidersScreen: React.FC = () => {
 
       const busData = busDoc.data();
       const currentRiders = busData.currentRiders || [];
+      const currentSubscribers = busData.subscribers || [];
       
       // Update payment status in currentRiders array
       const updatedRiders = currentRiders.map((r: any) => {
@@ -381,15 +422,92 @@ export const BusRidersScreen: React.FC = () => {
         return r;
       });
       
-      // Only update the bus document
+      // FIXED: Handle subscribers array properly
+      let updatedSubscribers = [...currentSubscribers];
+      
+      const existingSubscriberIndex = currentSubscribers.findIndex((sub: any) => 
+        sub.userId === rider.uid || sub.id === rider.uid
+      );
+      
+      if (newStatus === 'paid') {
+        if (existingSubscriberIndex >= 0) {
+          // Update existing subscriber
+          updatedSubscribers[existingSubscriberIndex] = {
+            ...updatedSubscribers[existingSubscriberIndex],
+            paymentStatus: 'paid',
+            status: 'active'
+          };
+        } else {
+          // Add new subscriber
+          const subscriberData = {
+            userId: rider.uid,
+            name: rider.name,
+            email: rider.email,
+            subscribedAt: new Date().toISOString(),
+            paymentStatus: 'paid',
+            status: 'active'
+          };
+          updatedSubscribers.push(subscriberData);
+        }
+        console.log(`✅ Added/Updated ${rider.name} as PAID subscriber`);
+        
+      } else {
+        if (existingSubscriberIndex >= 0) {
+          if (newStatus === 'unpaid') {
+            // Remove from subscribers when unpaid
+            updatedSubscribers.splice(existingSubscriberIndex, 1);
+            console.log(`❌ Removed ${rider.name} from subscribers (unpaid)`);
+          } else {
+            // Update to pending
+            updatedSubscribers[existingSubscriberIndex] = {
+              ...updatedSubscribers[existingSubscriberIndex],
+              paymentStatus: 'pending',
+              status: 'active'
+            };
+            console.log(`⏳ Updated ${rider.name} to pending subscriber`);
+          }
+        }
+      }
+      
+      // Update the bus document
       await updateDoc(busRef, {
         currentRiders: updatedRiders,
+        subscribers: updatedSubscribers,
         updatedAt: new Date().toISOString()
       });
 
-      Alert.alert('Success', `Payment status updated to ${newStatus} for ${rider.name}.`);
+      // CRITICAL: Update local bus state immediately
+      if (bus) {
+        setBus({
+          ...bus,
+          currentRiders: updatedRiders,
+          subscribers: updatedSubscribers
+        });
+      }
+
+      console.log(`🔄 PAYMENT STATUS UPDATE COMPLETE:`, {
+        riderName: rider.name,
+        newStatus,
+        totalSubscribers: updatedSubscribers.length,
+        paidSubscribers: updatedSubscribers.filter(s => s.paymentStatus === 'paid').length
+      });
+
+      Alert.alert(
+        'Success', 
+        `Payment status updated to ${newStatus} for ${rider.name}.${
+          newStatus === 'paid' ? ' User added to subscribers!' : 
+          newStatus === 'unpaid' ? ' User removed from subscribers!' : 
+          ' User status updated to pending.'
+        }`
+      );
       setShowPaymentModal(false);
       setSelectedRider(null);
+      
+      // FORCE REFRESH: Refresh the data to ensure everything is in sync
+      setTimeout(() => {
+        fetchBusAndRiders({ background: true });
+      }, 500);
+      
     } catch (error: any) {
       // Revert UI update on error
       setRiders(prevRiders => 
@@ -404,6 +522,33 @@ export const BusRidersScreen: React.FC = () => {
       setActionLoading(false);
     }
   };
+
+  const debugBusData = useCallback(async () => {
+    try {
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (busDoc.exists()) {
+        const busData = busDoc.data();
+        console.log('🔍 CURRENT BUS DATA STRUCTURE:', {
+          busName: busData.busName,
+          subscribers: busData.subscribers,
+          subscribersType: Array.isArray(busData.subscribers) ? 'array' : typeof busData.subscribers,
+          subscribersLength: busData.subscribers?.length || 0,
+          paidSubscribers: busData.subscribers?.filter((s: any) => s.paymentStatus === 'paid').length || 0
+        });
+      }
+    } catch (error) {
+      console.error('Error debugging bus data:', error);
+    }
+  }, [busId]);
+
+  // Call this after payment status updates
+  useEffect(() => {
+    if (bus) {
+      debugBusData();
+    }
+  }, [bus, debugBusData]);
 
   const renderQRCodeModal = () => {
     if (!selectedQRCode) return null;
@@ -928,6 +1073,13 @@ export const BusRidersScreen: React.FC = () => {
     );
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh data when screen comes into focus (e.g., when navigating back from dashboard)
+      fetchBusAndRiders({ background: true });
+    }, [fetchBusAndRiders])
+  );
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -959,7 +1111,7 @@ export const BusRidersScreen: React.FC = () => {
   }
 
   const currentRiders = riders.filter(r => r.isCurrentRider);
-  const subscribers = riders.filter(r => r.isSubscriber);
+  const paidSubscribers = riders.filter(r => r.paymentStatus === 'paid');
   const allRiders = riders;
 
   return (
@@ -997,13 +1149,12 @@ export const BusRidersScreen: React.FC = () => {
 
         {/* Stats Bar */}
         <View style={[styles.statsBar, { backgroundColor: colors.card }]}>
-      
-          <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: colors.primary }]}>
-              {subscribers.length}
+          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.statNumber, { color: colors.success }]}>
+              {paidSubscribers.length}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Subscribers
+              Paid Subscribers
             </Text>
           </View>
           <View style={styles.statItem}>
@@ -1464,5 +1615,12 @@ const styles = StyleSheet.create({
     fontSize: AppFontSizes.sm,
     fontWeight: '500',
     flex: 1,
+  },
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+    padding: AppSpacing.md,
+    borderRadius: AppBorderRadius.md,
+    marginRight: AppSpacing.md,
   },
 }); 

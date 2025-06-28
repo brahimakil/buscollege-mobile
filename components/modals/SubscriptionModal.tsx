@@ -2,14 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Dimensions,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useTheme } from '../../contexts/ThemeContext';
 import { AppBorderRadius, AppFontSizes, AppSpacing, getThemeShadow } from '../../themes/colors';
@@ -38,7 +38,7 @@ interface SubscriptionModalProps {
   visible: boolean;
   bus: Bus | null;
   onClose: () => void;
-  onSubscribe: (type: 'monthly' | 'per_ride', locationId?: string) => void;
+  onSubscribe: (type: 'monthly' | 'per_ride', locationIds?: string[]) => void;
 }
 
 export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
@@ -49,12 +49,22 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 }) => {
   const { colors, isDark } = useTheme();
   const [selectedType, setSelectedType] = useState<'monthly' | 'per_ride'>('monthly');
-  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
   if (!bus) return null;
 
   const availableSeats = bus.maxCapacity - (bus.currentRiders?.length || 0);
+
+  const toggleLocationSelection = (locationName: string) => {
+    setSelectedLocations(prev => {
+      if (prev.includes(locationName)) {
+        return prev.filter(name => name !== locationName);
+      } else {
+        return [...prev, locationName];
+      }
+    });
+  };
 
   const handleSubscribe = async () => {
     if (availableSeats <= 0) {
@@ -62,9 +72,14 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
       return;
     }
 
+    if (selectedLocations.length === 0) {
+      Alert.alert('Select Locations', 'Please select at least one bus stop location.');
+      return;
+    }
+
     setLoading(true);
     try {
-      await onSubscribe(selectedType, selectedLocation);
+      await onSubscribe(selectedType, selectedLocations);
     } finally {
       setLoading(false);
     }
@@ -149,9 +164,20 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 <View style={styles.locationsHeader}>
                   <Ionicons name="location" size={20} color={colors.primary} />
                   <Text style={[styles.locationsTitle, { color: colors.text }]}>
-                    Route Stops
+                    Route Stops ({selectedLocations.length} selected)
                   </Text>
                 </View>
+                {selectedLocations.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.clearAllButton, { backgroundColor: colors.error + '20', borderColor: colors.error }]}
+                    onPress={() => setSelectedLocations([])}
+                  >
+                    <Ionicons name="close-circle" size={16} color={colors.error} />
+                    <Text style={[styles.clearAllText, { color: colors.error }]}>
+                      Clear All ({selectedLocations.length})
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 {bus.locations
                   .sort((a, b) => a.order - b.order)
                   .map((location, index) => (
@@ -160,15 +186,15 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                       style={[
                         styles.locationItem,
                         {
-                          backgroundColor: selectedLocation === location.name 
+                          backgroundColor: selectedLocations.includes(location.name)
                             ? colors.primary + '20' 
                             : colors.backgroundSecondary,
-                          borderColor: selectedLocation === location.name 
+                          borderColor: selectedLocations.includes(location.name)
                             ? colors.primary 
                             : colors.border,
                         }
                       ]}
-                      onPress={() => setSelectedLocation(location.name)}
+                      onPress={() => toggleLocationSelection(location.name)}
                     >
                       <View style={styles.locationInfo}>
                         <Text style={[styles.locationName, { color: colors.text }]}>
@@ -178,7 +204,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                           {location.arrivalTimeFrom} - {location.arrivalTimeTo}
                         </Text>
                       </View>
-                      {selectedLocation === location.name && (
+                      {selectedLocations.includes(location.name) && (
                         <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
                       )}
                     </TouchableOpacity>
@@ -487,5 +513,20 @@ const styles = StyleSheet.create({
     fontSize: AppFontSizes.md,
     fontWeight: 'bold',
     marginLeft: AppSpacing.sm,
+  },
+  clearAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: AppSpacing.sm,
+    paddingHorizontal: AppSpacing.md,
+    borderRadius: AppBorderRadius.md,
+    marginBottom: AppSpacing.md,
+    borderWidth: 1,
+  },
+  clearAllText: {
+    fontSize: AppFontSizes.sm,
+    fontWeight: '500',
+    marginLeft: AppSpacing.xs,
   },
 }); 

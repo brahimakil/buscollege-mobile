@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -26,7 +27,14 @@ interface BusData {
   busLabel: string;
   maxCapacity: number;
   currentRiders: string[];
-  subscribers: string[];
+  subscribers: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    subscribedAt: string;
+    paymentStatus: 'paid' | 'unpaid' | 'pending';
+    status: 'active' | 'unsubscribed';
+  }>;
   pricePerMonth: number;
   pricePerRide: number;
   driverId: string;
@@ -68,7 +76,7 @@ interface RecentActivity {
 
 export const DriverDashboard: React.FC = () => {
   const { userData } = useAuth();
-  const { colors, isDark } = useTheme();
+  const { isDark, colors } = useTheme();
   const [buses, setBuses] = useState<BusData[]>([]);
   const [stats, setStats] = useState<DriverStats>({
     totalBuses: 0,
@@ -82,6 +90,19 @@ export const DriverDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Add fallback colors in case theme isn't available
+  const safeColors = colors || {
+    primary: '#3f51b5',
+    secondary: '#f50057',
+    accent: '#00b0ff',
+    warning: '#ff9800',
+    text: '#000',
+    textSecondary: '#666',
+    textInverse: '#fff',
+    card: '#fff',
+    info: '#2196F3'
+  };
 
   const fetchDriverBuses = useCallback(async () => {
     if (!userData?.uid) return [];
@@ -129,18 +150,27 @@ export const DriverDashboard: React.FC = () => {
         });
       }
 
-      // Generate new subscriber activities
+      // FIXED: Generate new subscriber activities only for PAID subscribers
       if (bus.subscribers && bus.subscribers.length > 0) {
-        const subscribeDate = new Date(now);
-        subscribeDate.setDate(subscribeDate.getDate() - Math.floor(Math.random() * 7));
-        
-        activities.push({
-          id: `subscriber-${bus.id}-${busIndex}`,
-          type: 'new_subscriber',
-          description: `New subscriber joined ${bus.busName}`,
-          date: subscribeDate,
-          busName: bus.busName
+        const paidSubscribers = bus.subscribers.filter((subscriber: any) => {
+          if (typeof subscriber === 'object' && subscriber.paymentStatus) {
+            return subscriber.paymentStatus === 'paid';
+          }
+          return false;
         });
+
+        if (paidSubscribers.length > 0) {
+          const subscribeDate = new Date(now);
+          subscribeDate.setDate(subscribeDate.getDate() - Math.floor(Math.random() * 7));
+          
+          activities.push({
+            id: `subscriber-${bus.id}-${busIndex}`,
+            type: 'new_subscriber',
+            description: `${paidSubscribers.length} paid subscriber${paidSubscribers.length !== 1 ? 's' : ''} on ${bus.busName}`,
+            date: subscribeDate,
+            busName: bus.busName
+          });
+        }
       }
 
       // Generate route completion activities
@@ -155,20 +185,29 @@ export const DriverDashboard: React.FC = () => {
         busName: bus.busName
       });
 
-      // Generate payment activities
+      // FIXED: Generate payment activities based on PAID subscribers only
       if (bus.subscribers && bus.subscribers.length > 0) {
-        const paymentDate = new Date(now);
-        paymentDate.setDate(paymentDate.getDate() - Math.floor(Math.random() * 30));
-        
-        const estimatedEarnings = bus.subscribers.length * bus.pricePerMonth;
-        activities.push({
-          id: `payment-${bus.id}-${busIndex}`,
-          type: 'payment_received',
-          description: `Monthly payments received for ${bus.busName}`,
-          date: paymentDate,
-          busName: bus.busName,
-          amount: estimatedEarnings
+        const paidSubscribers = bus.subscribers.filter((subscriber: any) => {
+          if (typeof subscriber === 'object' && subscriber.paymentStatus) {
+            return subscriber.paymentStatus === 'paid';
+          }
+          return false;
         });
+
+        if (paidSubscribers.length > 0) {
+          const paymentDate = new Date(now);
+          paymentDate.setDate(paymentDate.getDate() - Math.floor(Math.random() * 30));
+          
+          const estimatedEarnings = paidSubscribers.length * bus.pricePerMonth;
+          activities.push({
+            id: `payment-${bus.id}-${busIndex}`,
+            type: 'payment_received',
+            description: `Monthly payments received from ${paidSubscribers.length} subscriber${paidSubscribers.length !== 1 ? 's' : ''}`,
+            date: paymentDate,
+            busName: bus.busName,
+            amount: estimatedEarnings
+          });
+        }
       }
     });
 
@@ -179,19 +218,52 @@ export const DriverDashboard: React.FC = () => {
   }, []);
 
   const calculateStats = useCallback((buses: BusData[]) => {
+    console.log('🔍 CALCULATING DASHBOARD STATS:', buses.map(bus => ({
+      busName: bus.busName,
+      totalSubscribers: bus.subscribers?.length || 0,
+      subscribersArray: bus.subscribers,
+      paidSubscribers: bus.subscribers?.filter(s => s.paymentStatus === 'paid').length || 0
+    })));
+
     const totalBuses = buses.length;
     const totalRiders = buses.reduce((sum, bus) => sum + (bus.currentRiders?.length || 0), 0);
-    const totalSubscribers = buses.reduce((sum, bus) => sum + (bus.subscribers?.length || 0), 0);
+    
+    // FIXED: Only count subscribers with 'paid' payment status
+    const totalSubscribers = buses.reduce((sum, bus) => {
+      if (!bus.subscribers || !Array.isArray(bus.subscribers)) return sum;
+      
+      const paidSubscribers = bus.subscribers.filter((subscriber: any) => 
+        subscriber.paymentStatus === 'paid'
+      );
+      
+      console.log(`📊 Bus ${bus.busName}: ${paidSubscribers.length} paid subscribers out of ${bus.subscribers.length} total`);
+      
+      return sum + paidSubscribers.length;
+    }, 0);
+    
     const expectedCapacity = buses.reduce((sum, bus) => sum + (bus.maxCapacity || 0), 0);
     
-    // Calculate monthly earnings based on subscribers
+    // FIXED: Calculate monthly earnings based on PAID subscribers only
     const monthlyEarnings = buses.reduce((sum, bus) => {
-      const subscriberCount = bus.subscribers?.length || 0;
-      return sum + (subscriberCount * (bus.pricePerMonth || 0));
+      if (!bus.subscribers || !Array.isArray(bus.subscribers)) return sum;
+      
+      const paidSubscribers = bus.subscribers.filter((subscriber: any) => 
+        subscriber.paymentStatus === 'paid'
+      );
+      
+      return sum + (paidSubscribers.length * (bus.pricePerMonth || 0));
     }, 0);
 
-    // Calculate occupancy rate
     const occupancyRate = expectedCapacity > 0 ? Math.round((totalRiders / expectedCapacity) * 100) : 0;
+
+    console.log('📊 FINAL DASHBOARD STATS:', {
+      totalBuses,
+      totalRiders,
+      totalSubscribers, // Now only paid subscribers
+      monthlyEarnings, // Now based on paid subscribers only
+      expectedCapacity,
+      occupancyRate
+    });
 
     return {
       totalBuses,
@@ -277,11 +349,11 @@ export const DriverDashboard: React.FC = () => {
 
   const getActivityColor = (type: string) => {
     switch (type) {
-      case 'rider_pickup': return colors.info;
-      case 'new_subscriber': return colors.success;
-      case 'route_completed': return colors.primary;
-      case 'payment_received': return colors.warning;
-      default: return colors.textSecondary;
+      case 'rider_pickup': return safeColors.info;
+      case 'new_subscriber': return safeColors.success;
+      case 'route_completed': return safeColors.primary;
+      case 'payment_received': return safeColors.warning;
+      default: return safeColors.textSecondary;
     }
   };
 
@@ -299,28 +371,38 @@ export const DriverDashboard: React.FC = () => {
     return date.toLocaleDateString();
   };
 
-  // Convert buses to map routes format
-  const mapRoutes = buses
-    .filter(bus => bus && bus.locations && Array.isArray(bus.locations))
-    .map((bus, index) => ({
-      id: bus.id,
-      name: bus.busName || 'Unknown Bus',
-      locations: bus.locations.filter(loc => 
-        loc && 
-        typeof loc.latitude === 'number' && 
-        typeof loc.longitude === 'number' &&
-        !isNaN(loc.latitude) && 
-        !isNaN(loc.longitude)
-      ),
-      color: [colors.primary, colors.secondary, colors.accent, colors.warning, colors.info][index % 5]
+  // Convert buses to routes format for the map
+  const busRoutes = buses.map(bus => ({
+    id: bus.id,
+    name: bus.busName || bus.busLabel || 'Unknown Bus',
+    locations: (bus.locations || []).map(loc => ({
+      name: loc.name,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      order: loc.order || 0
     }))
-    .filter(route => route.locations.length > 0);
+  }));
+
+  // Add this to force refresh when needed
+  const forceRefresh = useCallback(() => {
+    console.log('🔄 FORCE REFRESHING DASHBOARD...');
+    setRefreshing(true);
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+
+  // Add useFocusEffect to refresh when returning to dashboard
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🔄 Dashboard focused - refreshing data...');
+      fetchDashboardData();
+    }, [fetchDashboardData])
+  );
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+      <View style={[styles.loadingContainer, { backgroundColor: safeColors.background }]}>
+        <ActivityIndicator size="large" color={safeColors.primary} />
+        <Text style={[styles.loadingText, { color: safeColors.textSecondary }]}>
           Loading dashboard...
         </Text>
       </View>
@@ -330,19 +412,19 @@ export const DriverDashboard: React.FC = () => {
   // Error state
   if (error && !refreshing) {
     return (
-      <View style={[styles.errorContainer, { backgroundColor: colors.background }]}>
-        <Ionicons name="alert-circle" size={64} color={colors.error} />
-        <Text style={[styles.errorTitle, { color: colors.text }]}>
+      <View style={[styles.errorContainer, { backgroundColor: safeColors.background }]}>
+        <Ionicons name="alert-circle" size={64} color={safeColors.error} />
+        <Text style={[styles.errorTitle, { color: safeColors.text }]}>
           Oops! Something went wrong
         </Text>
-        <Text style={[styles.errorMessage, { color: colors.textSecondary }]}>
+        <Text style={[styles.errorMessage, { color: safeColors.textSecondary }]}>
           {error}
         </Text>
         <TouchableOpacity
-          style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          style={[styles.retryButton, { backgroundColor: safeColors.primary }]}
           onPress={fetchDashboardData}
         >
-          <Text style={[styles.retryButtonText, { color: colors.textInverse }]}>
+          <Text style={[styles.retryButtonText, { color: safeColors.textInverse }]}>
             Try Again
           </Text>
         </TouchableOpacity>
@@ -352,22 +434,22 @@ export const DriverDashboard: React.FC = () => {
 
   return (
     <ScrollView 
-      style={[styles.container, { backgroundColor: colors.background }]}
+      style={[styles.container, { backgroundColor: safeColors.background }]}
       refreshControl={
         <RefreshControl 
           refreshing={refreshing} 
           onRefresh={onRefresh}
-          colors={[colors.primary]}
-          tintColor={colors.primary}
+          colors={[safeColors.primary]}
+          tintColor={safeColors.primary}
         />
       }
     >
       {/* Welcome Section */}
-      <View style={[styles.welcomeSection, { backgroundColor: colors.primary }]}>
-        <Text style={[styles.welcomeText, { color: colors.textInverse }]}>
+      <View style={[styles.welcomeSection, { backgroundColor: safeColors.primary }]}>
+        <Text style={[styles.welcomeText, { color: safeColors.textInverse }]}>
           Welcome back, {userData?.name}!
         </Text>
-        <Text style={[styles.welcomeSubtext, { color: colors.textInverse }]}>
+        <Text style={[styles.welcomeSubtext, { color: safeColors.textInverse }]}>
           Here's your driving overview
         </Text>
       </View>
@@ -378,94 +460,66 @@ export const DriverDashboard: React.FC = () => {
           <View style={[
             styles.statCard,
             {
-              backgroundColor: colors.card,
+              backgroundColor: safeColors.card,
               ...getThemeShadow(isDark, 'sm'),
             }
           ]}>
-            <Ionicons name="bus" size={24} color={colors.primary} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
+            <Ionicons name="bus" size={24} color={safeColors.primary} />
+            <Text style={[styles.statNumber, { color: safeColors.text }]}>
               {stats.totalBuses}
             </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            <Text style={[styles.statLabel, { color: safeColors.textSecondary }]}>
               Total Buses
             </Text>
           </View>
           <View style={[
             styles.statCard,
             {
-              backgroundColor: colors.card,
+              backgroundColor: safeColors.card,
               ...getThemeShadow(isDark, 'sm'),
             }
           ]}>
-            <Ionicons name="people" size={24} color={colors.info} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
+            <Ionicons name="people" size={24} color={safeColors.info} />
+            <Text style={[styles.statNumber, { color: safeColors.text }]}>
               {stats.totalRiders}
             </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            <Text style={[styles.statLabel, { color: safeColors.textSecondary }]}>
               Current Riders
             </Text>
           </View>
         </View>
         <View style={styles.statsRow}>
-          <View style={[
-            styles.statCard,
-            {
-              backgroundColor: colors.card,
-              ...getThemeShadow(isDark, 'sm'),
-            }
-          ]}>
-            <Ionicons name="person-add" size={24} color={colors.success} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
-              {stats.totalSubscribers}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Total Subscribers
-            </Text>
-          </View>
-          <View style={[
-            styles.statCard,
-            {
-              backgroundColor: colors.card,
-              ...getThemeShadow(isDark, 'sm'),
-            }
-          ]}>
-            <Ionicons name="wallet" size={24} color={colors.warning} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
-              ${stats.monthlyEarnings}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Monthly Earnings
-            </Text>
-          </View>
+         
+         
         </View>
         <View style={styles.statsRow}>
           <View style={[
             styles.statCard,
             {
-              backgroundColor: colors.card,
+              backgroundColor: safeColors.card,
               ...getThemeShadow(isDark, 'sm'),
             }
           ]}>
-            <Ionicons name="speedometer" size={24} color={colors.secondary} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
+            <Ionicons name="speedometer" size={24} color={safeColors.secondary} />
+            <Text style={[styles.statNumber, { color: safeColors.text }]}>
               {stats.expectedCapacity}
             </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            <Text style={[styles.statLabel, { color: safeColors.textSecondary }]}>
               Total Capacity
             </Text>
           </View>
           <View style={[
             styles.statCard,
             {
-              backgroundColor: colors.card,
+              backgroundColor: safeColors.card,
               ...getThemeShadow(isDark, 'sm'),
             }
           ]}>
-            <Ionicons name="analytics" size={24} color={colors.accent} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
+            <Ionicons name="analytics" size={24} color={safeColors.accent} />
+            <Text style={[styles.statNumber, { color: safeColors.text }]}>
               {stats.occupancyRate}%
             </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            <Text style={[styles.statLabel, { color: safeColors.textSecondary }]}>
               Occupancy Rate
             </Text>
           </View>
@@ -473,20 +527,20 @@ export const DriverDashboard: React.FC = () => {
       </View>
 
       {/* Map Section */}
-      {mapRoutes.length > 0 && (
+      {buses.length > 0 && (
         <View style={styles.mapSection}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          <Text style={[styles.sectionTitle, { color: safeColors.text }]}>
             Your Bus Routes
           </Text>
           <View style={[
             styles.mapContainer,
             {
-              backgroundColor: colors.card,
+              backgroundColor: safeColors.card,
               ...getThemeShadow(isDark, 'md'),
             }
           ]}>
             <MapComponent 
-              routes={mapRoutes}
+              routes={busRoutes}
               height={300}
               centerLat={33.8547}
               centerLng={35.8623}
@@ -498,22 +552,22 @@ export const DriverDashboard: React.FC = () => {
 
       {/* Recent Activity */}
       <View style={styles.activitySection}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        <Text style={[styles.sectionTitle, { color: safeColors.text }]}>
           Recent Activity
         </Text>
         {recentActivity.length === 0 ? (
           <View style={[
             styles.emptyState,
             {
-              backgroundColor: colors.card,
+              backgroundColor: safeColors.card,
               ...getThemeShadow(isDark, 'sm'),
             }
           ]}>
-            <Ionicons name="time" size={48} color={colors.textTertiary} />
-            <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+            <Ionicons name="time" size={48} color={safeColors.textTertiary} />
+            <Text style={[styles.emptyStateText, { color: safeColors.textSecondary }]}>
               No recent activity
             </Text>
-            <Text style={[styles.emptyStateSubtext, { color: colors.textTertiary }]}>
+            <Text style={[styles.emptyStateSubtext, { color: safeColors.textTertiary }]}>
               Activity will appear here as you manage your buses
             </Text>
           </View>
@@ -524,7 +578,7 @@ export const DriverDashboard: React.FC = () => {
               style={[
                 styles.activityItem,
                 {
-                  backgroundColor: colors.card,
+                  backgroundColor: safeColors.card,
                   borderLeftColor: getActivityColor(activity.type),
                   ...getThemeShadow(isDark, 'sm'),
                 }
@@ -541,27 +595,27 @@ export const DriverDashboard: React.FC = () => {
                 />
               </View>
               <View style={styles.activityContent}>
-                <Text style={[styles.activityDescription, { color: colors.text }]}>
+                <Text style={[styles.activityDescription, { color: safeColors.text }]}>
                   {activity.description}
                 </Text>
                 <View style={styles.activityMeta}>
-                  <Text style={[styles.activityDate, { color: colors.textSecondary }]}>
+                  <Text style={[styles.activityDate, { color: safeColors.textSecondary }]}>
                     {formatDate(activity.date)}
                   </Text>
                   {activity.riderCount && (
-                    <Text style={[styles.activityExtra, { color: colors.textTertiary }]}>
+                    <Text style={[styles.activityExtra, { color: safeColors.textTertiary }]}>
                       • {activity.riderCount} riders
                     </Text>
                   )}
                 </View>
                 {activity.busName && (
-                  <Text style={[styles.activityBus, { color: colors.textTertiary }]}>
+                  <Text style={[styles.activityBus, { color: safeColors.textTertiary }]}>
                     {activity.busName}
                   </Text>
                 )}
               </View>
               {activity.amount && (
-                <Text style={[styles.activityAmount, { color: colors.success }]}>
+                <Text style={[styles.activityAmount, { color: safeColors.success }]}>
                   ${activity.amount}
                 </Text>
               )}

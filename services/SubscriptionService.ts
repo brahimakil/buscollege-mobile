@@ -193,7 +193,32 @@ export class SubscriptionService {
         });
       }
 
-      console.log('✅ Successfully created subscription');
+      // STEP 8: Add user to bus subscribers array (separate from currentRiders)
+      const currentSubscribers = busData.subscribers || [];
+      
+      const isAlreadySubscriber = currentSubscribers.some((sub: any) => 
+        typeof sub === 'string' ? sub === userId : sub.userId === userId || sub.id === userId
+      );
+
+      if (!isAlreadySubscriber) {
+        const subscriberData = {
+          userId,
+          name: userData.name,
+          email: userData.email,
+          subscriptionType,
+          subscribedAt: now,
+          paymentStatus: 'pending', // Initially pending
+          status: 'active'
+        };
+
+        await updateDoc(busRef, {
+          subscribers: arrayUnion(subscriberData),
+          updatedAt: now
+        });
+        console.log(`✅ Added user to subscribers array`);
+      }
+
+      console.log('✅ Successfully created subscription with subscriber tracking');
     } catch (error) {
       console.error('❌ Error subscribing to bus:', error);
       throw error;
@@ -268,6 +293,93 @@ export class SubscriptionService {
       console.log('✅ Successfully unsubscribed from bus route - subscription marked as unsubscribed');
     } catch (error) {
       console.error('❌ Error unsubscribing from bus:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel a pending subscription - Completely removes it from database
+   */
+  static async cancelPendingSubscription(userId: string, busId: string): Promise<void> {
+    try {
+      console.log(`❌ Canceling pending subscription for user ${userId} from bus ${busId}`);
+      
+      // Get current user data
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        throw new Error('User not found');
+      }
+
+      const userData = userDoc.data();
+      const currentAssignments = userData.busAssignments || [];
+
+      // Find the pending subscription
+      const pendingSubscription = currentAssignments.find(
+        (assignment: any) => 
+          assignment.busId === busId && 
+          assignment.status === 'active' && 
+          assignment.paymentStatus === 'pending'
+      );
+
+      if (!pendingSubscription) {
+        throw new Error('Pending subscription not found');
+      }
+
+      // Get bus data
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        throw new Error('Bus not found');
+      }
+
+      const now = new Date().toISOString();
+
+      // COMPLETELY REMOVE the subscription from user's busAssignments
+      await updateDoc(userRef, {
+        busAssignments: arrayRemove(pendingSubscription),
+        updatedAt: now
+      });
+
+      console.log(`✅ Completely removed pending subscription from user data`);
+
+      // Remove user from bus currentRiders if they're there
+      const busData = busDoc.data();
+      const isInCurrentRiders = busData.currentRiders?.includes(userId) || false;
+      
+      if (isInCurrentRiders) {
+        await updateDoc(busRef, {
+          currentRiders: arrayRemove(userId),
+          updatedAt: now
+        });
+        console.log(`✅ Removed user from bus currentRiders`);
+      }
+
+      // Remove user from bus subscribers if they're there
+      const isInSubscribers = busData.subscribers?.some((sub: any) => 
+        (typeof sub === 'string' ? sub === userId : sub.userId === userId)
+      ) || false;
+      
+      if (isInSubscribers) {
+        // Find the subscriber object to remove
+        const subscriberToRemove = busData.subscribers.find((sub: any) => 
+          typeof sub === 'string' ? sub === userId : sub.userId === userId
+        );
+        
+        if (subscriberToRemove) {
+          await updateDoc(busRef, {
+            subscribers: arrayRemove(subscriberToRemove),
+            updatedAt: now
+          });
+          console.log(`✅ Removed user from bus subscribers`);
+        }
+      }
+
+      console.log('✅ Successfully canceled pending subscription - completely removed from database');
+    } catch (error) {
+      console.error('❌ Error canceling pending subscription:', error);
       throw error;
     }
   }

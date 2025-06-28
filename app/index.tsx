@@ -18,19 +18,18 @@ export default function IndexScreen() {
 
     if (!loading) {
       if (user && userData) {
-        console.log('Redirecting to dashboard for role:', userData.role);
-        // Redirect to appropriate dashboard based on role
         if (userData.role === 'driver') {
+          console.log('Redirecting to driver dashboard');
           router.replace('/dashboard/driver');
         } else if (userData.role === 'rider') {
+          console.log('Redirecting to rider dashboard');
           router.replace('/dashboard/rider');
         } else {
           console.log('Unknown role:', userData.role);
           router.replace('/auth/login');
         }
       } else {
-        console.log('No user or userData, redirecting to login');
-        // Redirect to login if not authenticated
+        console.log('No user, redirecting to login');
         router.replace('/auth/login');
       }
     }

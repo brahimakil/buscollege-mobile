@@ -2,13 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View
+  ActivityIndicator,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
 } from 'react-native';
 import { MapComponent } from '../../components/map/MapComponent';
 import { db } from '../../config/firebase';
@@ -16,8 +16,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { SubscriptionService } from '../../services/SubscriptionService';
 import { AppBorderRadius, AppFontSizes, AppSpacing, getThemeShadow } from '../../themes/colors';
-
-const { width } = Dimensions.get('window');
+Dimensions.get('window');
 
 interface BusData {
   id: string;
@@ -70,6 +69,24 @@ export const RiderDashboard: React.FC = () => {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showMap, setShowMap] = useState(true); // Default to map view
+
+  // FIX: Correctly generate map routes
+  const mapRoutes = buses
+    .filter(bus => bus && bus.locations && Array.isArray(bus.locations))
+    .map((bus, index) => ({
+      id: bus.id || `bus-${index}`,
+      name: bus.busName || 'Unknown Bus',
+      locations: bus.locations.filter(loc => 
+        loc && 
+        typeof loc.latitude === 'number' && 
+        typeof loc.longitude === 'number' &&
+        !isNaN(loc.latitude) && 
+        !isNaN(loc.longitude)
+      ),
+      color: [colors.primary, colors.secondary, colors.accent, colors.warning][index % 4]
+    }))
+    .filter(route => route.locations.length > 0);
 
   const fetchUserSubscriptions = useCallback(async () => {
     if (!userData?.uid) return { subscriptions: [], buses: [] };
@@ -157,12 +174,20 @@ export const RiderDashboard: React.FC = () => {
       const bus = buses.find(b => b.id === sub.busId);
       const busName = bus?.busName || 'Unknown Bus';
 
+      // Helper function to safely convert date
+      const safeDate = (dateValue: any) => {
+        if (!dateValue) return new Date();
+        if (typeof dateValue === 'string') return new Date(dateValue);
+        if (dateValue.toDate && typeof dateValue.toDate === 'function') return dateValue.toDate();
+        return new Date();
+      };
+
       // Subscription activity
       activities.push({
         id: `sub-${sub.busId}-${index}`,
         type: 'subscription',
         description: `Subscribed to ${busName} (${sub.subscriptionType})`,
-        date: sub.assignedAt?.toDate() || new Date(sub.assignedAt) || new Date(),
+        date: safeDate(sub.assignedAt),
         amount: sub.subscriptionType === 'monthly' ? bus?.pricePerMonth : bus?.pricePerRide,
         busName,
         status: sub.paymentStatus === 'paid' ? 'completed' : 'pending'
@@ -174,7 +199,7 @@ export const RiderDashboard: React.FC = () => {
           id: `payment-${sub.busId}-${index}`,
           type: 'payment',
           description: `Payment processed for ${busName}`,
-          date: sub.updatedAt?.toDate() || new Date(sub.updatedAt) || new Date(),
+          date: safeDate(sub.updatedAt),
           amount: sub.subscriptionType === 'monthly' ? bus?.pricePerMonth : bus?.pricePerRide,
           busName,
           status: 'completed'
@@ -344,23 +369,6 @@ export const RiderDashboard: React.FC = () => {
     return date.toLocaleDateString();
   };
 
-  // Convert buses to map routes format with null checks
-  const mapRoutes = buses
-    .filter(bus => bus && bus.locations && Array.isArray(bus.locations))
-    .map((bus, index) => ({
-      id: bus.id || `bus-${index}`,
-      name: bus.busName || 'Unknown Bus',
-      locations: bus.locations.filter(loc => 
-        loc && 
-        typeof loc.latitude === 'number' && 
-        typeof loc.longitude === 'number' &&
-        !isNaN(loc.latitude) && 
-        !isNaN(loc.longitude)
-      ),
-      color: [colors.primary, colors.secondary, colors.accent, colors.warning][index % 4]
-    }))
-    .filter(route => route.locations.length > 0);
-
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -393,7 +401,7 @@ export const RiderDashboard: React.FC = () => {
           Here's your riding overview
         </Text>
       </View>
-
+          {/* Statistics Cards */}
       {/* Statistics Cards */}
       <View style={styles.statsContainer}>
         <View style={styles.statsRow}>
@@ -461,7 +469,7 @@ export const RiderDashboard: React.FC = () => {
           </View>
         </View>
       </View>
-
+          {/* Subscription Types */}
       {/* Subscription Types */}
       <View style={styles.subscriptionTypesContainer}>
         <View style={styles.statsRow}>
@@ -497,7 +505,7 @@ export const RiderDashboard: React.FC = () => {
           </View>
         </View>
       </View>
-
+          {/* Map Section */}
       {/* Map Section */}
       {mapRoutes.length > 0 && (
         <View style={styles.mapSection}>
@@ -521,7 +529,7 @@ export const RiderDashboard: React.FC = () => {
           </View>
         </View>
       )}
-
+          {/* Recent Activity */}
       {/* Recent Activity */}
       <View style={styles.activitySection}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>

@@ -3,15 +3,15 @@ import { useRouter } from 'expo-router';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -26,7 +26,14 @@ interface BusData {
   busLabel: string;
   maxCapacity: number;
   currentRiders: string[];
-  subscribers: string[];
+  subscribers: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    subscribedAt: string;
+    paymentStatus: 'paid' | 'unpaid' | 'pending';
+    status: 'active' | 'unsubscribed';
+  }>;
   pricePerMonth: number;
   pricePerRide: number;
   driverId: string;
@@ -84,10 +91,23 @@ export const MyBusesScreen: React.FC = () => {
       );
       
       const busesSnapshot = await getDocs(busesQuery);
-      const driverBuses = busesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as BusData[];
+      const driverBuses = busesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        
+        // DEBUG: Log the actual bus data
+        console.log('🚌 Bus data from Firebase:', {
+          id: doc.id,
+          busName: data.busName,
+          busLabel: data.busLabel,
+          hasName: !!data.busName,
+          hasLabel: !!data.busLabel
+        });
+        
+        return {
+          id: doc.id,
+          ...data
+        };
+      }) as BusData[];
 
       console.log('🚌 Found buses:', driverBuses.length);
       setBuses(driverBuses);
@@ -110,10 +130,37 @@ export const MyBusesScreen: React.FC = () => {
   }, [fetchMyBuses]);
 
   const calculateBusStats = (bus: BusData): BusStats => {
-    const totalSubscribers = bus.subscribers?.length || 0;
+    // FIXED: Only count subscribers with 'paid' payment status
+    let totalSubscribers = 0;
+    
+    if (bus.subscribers && Array.isArray(bus.subscribers)) {
+      const paidSubscribers = bus.subscribers.filter((subscriber: any) => {
+        // Handle both string and object formats
+        if (typeof subscriber === 'string') {
+          // If it's just a string (legacy format), we can't check payment status
+          // So we'll assume they're not paid unless we have payment data
+          return false;
+        } else if (typeof subscriber === 'object' && subscriber.paymentStatus) {
+          return subscriber.paymentStatus === 'paid';
+        }
+        return false;
+      });
+      
+      totalSubscribers = paidSubscribers.length;
+    }
+    
     const currentRiders = bus.currentRiders?.length || 0;
     const occupancyRate = bus.maxCapacity > 0 ? Math.round((currentRiders / bus.maxCapacity) * 100) : 0;
+    
+    // FIXED: Calculate monthly revenue based on PAID subscribers only
     const monthlyRevenue = totalSubscribers * (bus.pricePerMonth || 0);
+
+    console.log(`📊 Bus ${bus.busName} stats:`, {
+      totalSubscribers, // Now only paid subscribers
+      currentRiders,
+      occupancyRate,
+      monthlyRevenue // Now based on paid subscribers only
+    });
 
     return {
       totalSubscribers,
@@ -142,8 +189,15 @@ export const MyBusesScreen: React.FC = () => {
   };
 
   const getStatusText = (status: string | undefined) => {
-    if (!status) return 'Unknown';
-    return status.charAt(0).toUpperCase() + status.slice(1);
+    switch(status) {
+      case 'active': return 'Active';
+      case 'inactive': return 'Inactive';
+      case 'maintenance': return 'Maintenance';
+      case 'unknown':
+      case undefined:
+      case null:
+      default: return 'Active'; // Default to Active instead of Unknown
+    }
   };
 
   const formatWorkingDays = (workingDays: BusData['workingDays'] | undefined) => {
@@ -173,7 +227,32 @@ export const MyBusesScreen: React.FC = () => {
 
   const renderBusCard = (bus: BusData) => {
     const stats = calculateBusStats(bus);
-    const busStatus = bus.status || 'unknown';
+    const busStatus = bus.status || 'active';
+    
+    // FIXED: Smart bus name display logic
+    const getBusDisplayName = () => {
+      if (bus.busName && bus.busName.trim()) {
+        return bus.busName.trim();
+      }
+      if (bus.busLabel && bus.busLabel.trim()) {
+        return bus.busLabel.trim();
+      }
+      return `Bus Route ${bus.id.slice(-6).toUpperCase()}`;
+    };
+    
+    const getBusDisplayLabel = () => {
+      // Only show label if it exists and is different from the name
+      if (bus.busLabel && 
+          bus.busLabel.trim() && 
+          bus.busName && 
+          bus.busLabel.trim() !== bus.busName.trim()) {
+        return bus.busLabel.trim();
+      }
+      return null;
+    };
+    
+    const displayName = getBusDisplayName();
+    const displayLabel = getBusDisplayLabel();
     
     return (
       <View
@@ -190,11 +269,14 @@ export const MyBusesScreen: React.FC = () => {
         <View style={styles.busHeader}>
           <View style={styles.busInfo}>
             <Text style={[styles.busName, { color: colors.text }]}>
-              {bus.busName || 'Unnamed Bus'}
+              {displayName}
             </Text>
-            <Text style={[styles.busLabel, { color: colors.textSecondary }]}>
-              {bus.busLabel || 'No label'}
-            </Text>
+            {/* FIXED: Only show label if it exists and is meaningful */}
+            {displayLabel && (
+              <Text style={[styles.busLabel, { color: colors.textSecondary }]}>
+                {displayLabel}
+              </Text>
+            )}
           </View>
           <View style={[styles.statusBadge, { backgroundColor: getStatusColor(busStatus) + '20' }]}>
             <Ionicons 
@@ -229,15 +311,8 @@ export const MyBusesScreen: React.FC = () => {
               Occupancy
             </Text>
           </View>
-          <View style={styles.statItem}>
-            <Ionicons name="wallet" size={20} color={colors.warning} />
-            <Text style={[styles.statNumber, { color: colors.text }]}>
-              ${stats.monthlyRevenue}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Monthly
-            </Text>
-          </View>
+        
+          
         </View>
 
         {/* Operating Info */}
@@ -282,7 +357,7 @@ export const MyBusesScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Action Button - Only View Riders */}
+        {/* Action Button */}
         <TouchableOpacity
           style={[styles.viewRidersButton, { backgroundColor: colors.primary }]}
           onPress={() => handleViewRiders(bus)}
@@ -391,14 +466,7 @@ export const MyBusesScreen: React.FC = () => {
                   {buses.reduce((sum, bus) => sum + (bus.currentRiders?.length || 0), 0)}
                 </Text>
               </View>
-              <View style={[styles.summaryCard, { backgroundColor: colors.card }]}>
-                <Text style={[styles.summaryTitle, { color: colors.text }]}>
-                  Monthly Revenue
-                </Text>
-                <Text style={[styles.summaryValue, { color: colors.warning }]}>
-                  ${buses.reduce((sum, bus) => sum + ((bus.subscribers?.length || 0) * (bus.pricePerMonth || 0)), 0)}
-                </Text>
-              </View>
+             
             </View>
 
             {/* Bus Cards */}
@@ -408,16 +476,6 @@ export const MyBusesScreen: React.FC = () => {
           </>
         )}
       </ScrollView>
-
-      {/* Floating Add Button */}
-      {buses.length > 0 && (
-        <TouchableOpacity
-          style={[styles.fab, { backgroundColor: colors.primary }]}
-          onPress={handleAddNewBus}
-        >
-          <Ionicons name="add" size={24} color={colors.textInverse} />
-        </TouchableOpacity>
-      )}
     </View>
   );
 };
@@ -630,20 +688,5 @@ const styles = StyleSheet.create({
   addFirstBusButtonText: {
     fontSize: AppFontSizes.md,
     fontWeight: '600',
-  },
-  fab: {
-    position: 'absolute',
-    bottom: AppSpacing.lg,
-    right: AppSpacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
   },
 });
