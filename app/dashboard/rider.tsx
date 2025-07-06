@@ -12,6 +12,11 @@ export default function RiderDashboardRoute() {
   const [currentRoute, setCurrentRoute] = useState('dashboard');
 
   const handleNavigate = (route: string) => {
+    if (route === 'profile') {
+      // Navigate to the separate profile page
+      router.push('/profile/rider');
+      return;
+    }
     setCurrentRoute(route);
   };
 

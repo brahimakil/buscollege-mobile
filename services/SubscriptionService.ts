@@ -1,4 +1,4 @@
-import { arrayRemove, arrayUnion, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { arrayRemove, arrayUnion, collection, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 export interface SubscriptionData {
@@ -6,53 +6,58 @@ export interface SubscriptionData {
   locationId: string | null;
   subscriptionType: 'monthly' | 'per_ride';
   paymentStatus: 'pending' | 'paid' | 'unpaid';
-  status: 'active' | 'unsubscribed' | 'expired';
+  status: 'active' | 'inactive'; // ✅ active = subscribed, inactive = unsubscribed
   assignedAt: string;
-  startDate?: string;
+  startDate: string;
   endDate?: string;
   unsubscribedAt?: string;
-  updatedAt?: string;
-  qrCode?: string;
-  subscriptionId?: string;
-  subscriberName?: string;
-  subscriberEmail?: string;
+  updatedAt: string;
+  qrCode: string;
+  subscriptionId: string;
+  subscriberName: string;
+  subscriberEmail: string;
 }
 
-export interface BusSubscriber {
-  userId: string;
+// ✅ Complete rider data stored in bus currentRiders array
+export interface CurrentRiderData {
+  id: string; // userId
   name: string;
   email: string;
-  subscriptionType: 'monthly' | 'per_ride';
-  subscribedAt: string;
+  
+  // Complete subscription data in currentRiders
+  busId: string;
+  locationId: string | null;
   paymentStatus: 'pending' | 'paid' | 'unpaid';
-  status: 'active' | 'unsubscribed' | 'expired';
-  unsubscribedAt?: string;
+  status: 'active' | 'inactive'; // ✅ active = subscribed, inactive = unsubscribed
+  subscriptionType: 'monthly' | 'per_ride';
+  assignedAt: string;
+  startDate: string;
+  endDate?: string;
+  qrCode: string;
+  subscriptionId: string;
+  subscriberName: string;
+  subscriberEmail: string;
+  updatedAt: string;
 }
 
 export class SubscriptionService {
-  /**
-   * Generate QR code data for subscription
-   */
+  
   private static generateQRCodeData(userId: string, busId: string, subscriptionId: string): string {
-    const qrData = {
+    return JSON.stringify({
       userId,
       busId,
       subscriptionId,
       timestamp: Date.now(),
       type: 'bus_subscription'
-    };
-    return JSON.stringify(qrData);
+    });
   }
 
-  /**
-   * Generate a unique subscription ID
-   */
   private static generateSubscriptionId(): string {
-    return `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `sub_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 
   /**
-   * Subscribe to a bus route with smart cleanup (only removes old subscriptions)
+   * ✅ FIXED: Subscribe to bus - ENSURE status is 'active' and handle duplicates
    */
   static async subscribeToBus(
     userId: string,
@@ -63,10 +68,7 @@ export class SubscriptionService {
     try {
       console.log(`🚌 Starting subscription process for user ${userId} to bus ${busId}`);
 
-      // STEP 1: Clean up any existing duplicates first
-      await this.cleanupDuplicateSubscriptions(userId);
-
-      // STEP 2: Get current user data and check for existing active subscriptions
+      // Get current user data
       const userRef = doc(db, 'users', userId);
       const userDoc = await getDoc(userRef);
       
@@ -75,59 +77,8 @@ export class SubscriptionService {
       }
 
       const userData = userDoc.data();
-      const currentAssignments = userData.busAssignments || [];
 
-      // ENHANCED VALIDATION - Check for existing active subscription AND verify with bus currentRiders
-      const existingActiveSubscription = currentAssignments.find(
-        (assignment: any) => 
-          assignment.busId === busId && assignment.status === 'active'
-      );
-
-      if (existingActiveSubscription) {
-        // Double-check: verify user is actually in bus currentRiders
-        const busRef = doc(db, 'buses', busId);
-        const busDoc = await getDoc(busRef);
-        
-        if (busDoc.exists()) {
-          const busData = busDoc.data();
-          const currentRiders = busData.currentRiders || [];
-          
-          const isInCurrentRiders = currentRiders.some((rider: any) => {
-            if (typeof rider === 'string') {
-              return rider === userId;
-            } else if (typeof rider === 'object' && rider.id) {
-              return rider.id === userId;
-            }
-            return false;
-          });
-
-          if (isInCurrentRiders) {
-            console.log('⚠️ User already has active subscription and is in currentRiders');
-            throw new Error('You already have an active subscription to this bus route');
-          } else {
-            // User has active subscription but not in currentRiders - clean it up
-            console.log('🧹 Found orphaned active subscription, cleaning up...');
-            const updatedSubscription = {
-              ...existingActiveSubscription,
-              status: 'unsubscribed',
-              unsubscribedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            };
-
-            await updateDoc(userRef, {
-              busAssignments: arrayRemove(existingActiveSubscription)
-            });
-
-            await updateDoc(userRef, {
-              busAssignments: arrayUnion(updatedSubscription)
-            });
-
-            console.log('✅ Cleaned up orphaned subscription, proceeding with new subscription');
-          }
-        }
-      }
-
-      // STEP 3: Get bus data and validate
+      // Get bus data and validate
       const busRef = doc(db, 'buses', busId);
       const busDoc = await getDoc(busRef);
       
@@ -138,16 +89,29 @@ export class SubscriptionService {
       const busData = busDoc.data();
       let currentRiders = busData.currentRiders || [];
       
-      // STEP 4: Check capacity
-      const riderCount = currentRiders.filter((rider: any) => 
-        typeof rider === 'string' ? true : rider.id
-      ).length;
+      // ✅ IMPROVED: Check for ANY existing entry and remove it first
+      const existingRiderIndex = currentRiders.findIndex((rider: any) => rider.id === userId);
       
+      if (existingRiderIndex !== -1) {
+        console.log('🧹 Found existing rider entry, removing it first...');
+        const existingRider = currentRiders[existingRiderIndex];
+        
+        // Remove the existing entry
+        await updateDoc(busRef, {
+          currentRiders: arrayRemove(existingRider),
+          updatedAt: new Date().toISOString()
+        });
+        
+        console.log('✅ Removed existing rider entry');
+      }
+
+      // Check capacity (after potential removal)
+      const riderCount = currentRiders.length - (existingRiderIndex !== -1 ? 1 : 0);
       if (riderCount >= busData.maxCapacity) {
         throw new Error('This bus route is at full capacity');
       }
 
-      // STEP 5: Create subscription data
+      // Create complete subscription data
       const subscriptionId = this.generateSubscriptionId();
       const qrCodeData = this.generateQRCodeData(userId, busId, subscriptionId);
       const now = new Date().toISOString();
@@ -159,12 +123,18 @@ export class SubscriptionService {
         endDate = end.toISOString();
       }
 
-      const subscriptionData: SubscriptionData = {
+      // ✅ FORCE status to be 'active' - add explicit logging
+      const currentRiderData: CurrentRiderData = {
+        id: userId,
+        name: userData.name,
+        email: userData.email,
+        
+        // Complete subscription data
         busId,
         locationId,
-        subscriptionType,
         paymentStatus: 'pending',
-        status: 'active',
+        status: 'active', // ✅ EXPLICITLY SET TO ACTIVE
+        subscriptionType,
         assignedAt: now,
         startDate: now,
         ...(endDate ? { endDate } : {}),
@@ -175,50 +145,35 @@ export class SubscriptionService {
         updatedAt: now
       };
 
-      // STEP 6: Add subscription to user (only once)
-      await updateDoc(userRef, {
-        busAssignments: arrayUnion(subscriptionData),
+      // ✅ ADD EXPLICIT LOGGING
+      console.log('🔍 CREATING RIDER DATA:', {
+        userId,
+        status: currentRiderData.status,
+        paymentStatus: currentRiderData.paymentStatus,
+        subscriptionId: currentRiderData.subscriptionId
+      });
+
+      // Add to bus currentRiders
+      await updateDoc(busRef, {
+        currentRiders: arrayUnion(currentRiderData),
         updatedAt: now
       });
 
-      // STEP 7: Add user to bus currentRiders (only if not already there)
-      const isAlreadyInRiders = currentRiders.some((rider: any) => 
-        typeof rider === 'string' ? rider === userId : rider.id === userId
-      );
-
-      if (!isAlreadyInRiders) {
-        await updateDoc(busRef, {
-          currentRiders: arrayUnion(userId),
-          updatedAt: now
+      // ✅ VERIFY what was actually saved
+      console.log('🔍 VERIFYING SAVED DATA...');
+      const updatedBusDoc = await getDoc(busRef);
+      if (updatedBusDoc.exists()) {
+        const updatedBusData = updatedBusDoc.data();
+        const savedRider = updatedBusData.currentRiders?.find((rider: any) => rider.id === userId);
+        console.log('🔍 SAVED RIDER DATA:', {
+          found: !!savedRider,
+          status: savedRider?.status,
+          paymentStatus: savedRider?.paymentStatus,
+          subscriptionId: savedRider?.subscriptionId
         });
       }
 
-      // STEP 8: Add user to bus subscribers array (separate from currentRiders)
-      const currentSubscribers = busData.subscribers || [];
-      
-      const isAlreadySubscriber = currentSubscribers.some((sub: any) => 
-        typeof sub === 'string' ? sub === userId : sub.userId === userId || sub.id === userId
-      );
-
-      if (!isAlreadySubscriber) {
-        const subscriberData = {
-          userId,
-          name: userData.name,
-          email: userData.email,
-          subscriptionType,
-          subscribedAt: now,
-          paymentStatus: 'pending', // Initially pending
-          status: 'active'
-        };
-
-        await updateDoc(busRef, {
-          subscribers: arrayUnion(subscriberData),
-          updatedAt: now
-        });
-        console.log(`✅ Added user to subscribers array`);
-      }
-
-      console.log('✅ Successfully created subscription with subscriber tracking');
+      console.log('✅ Successfully subscribed with ACTIVE status and PENDING payment');
     } catch (error) {
       console.error('❌ Error subscribing to bus:', error);
       throw error;
@@ -226,218 +181,135 @@ export class SubscriptionService {
   }
 
   /**
-   * Unsubscribe a rider from a bus route - Mark as unsubscribed instead of removing
+   * ✅ UPDATED: Update payment status with automatic expiration tracking
    */
-  static async unsubscribeFromBus(userId: string, busId: string): Promise<void> {
+  static async updatePaymentStatus(
+    userId: string, 
+    busId: string, 
+    paymentStatus: 'pending' | 'paid' | 'unpaid'
+  ): Promise<void> {
     try {
-      console.log(`🚌 Starting unsubscription process for user ${userId} from bus ${busId}`);
+      console.log(`🔄 Updating payment status for user ${userId} on bus ${busId} to ${paymentStatus}`);
       
-      // Get current user data
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        throw new Error('User not found');
-      }
-
-      const userData = userDoc.data();
-      const currentAssignments = userData.busAssignments || [];
-
-      // Find the active subscription
-      const activeSubscription = currentAssignments.find(
-        (assignment: any) => assignment.busId === busId && assignment.status === 'active'
-      );
-
-      if (!activeSubscription) {
-        throw new Error('Active subscription not found');
-      }
-
-      // Get bus data
+      // Get current bus data
       const busRef = doc(db, 'buses', busId);
       const busDoc = await getDoc(busRef);
       
       if (!busDoc.exists()) {
         throw new Error('Bus not found');
       }
-
-      const now = new Date().toISOString();
-
-      // Create updated subscription with unsubscribed status
-      const updatedSubscription: SubscriptionData = {
-        ...activeSubscription,
-        status: 'unsubscribed',
-        unsubscribedAt: now,
-        updatedAt: now
-      };
-
-      // Remove old subscription and add updated one
-      await updateDoc(userRef, {
-        busAssignments: arrayRemove(activeSubscription),
-        updatedAt: now
-      });
-
-      await updateDoc(userRef, {
-        busAssignments: arrayUnion(updatedSubscription),
-        updatedAt: now
-      });
-
-      console.log(`✅ Updated user subscription status to unsubscribed`);
-
-      // Update bus document - remove from currentRiders ONLY
-      await updateDoc(busRef, {
-        currentRiders: arrayRemove(userId),
-        updatedAt: now
-      });
-
-      console.log(`✅ Removed user from bus currentRiders`);
-      console.log('✅ Successfully unsubscribed from bus route - subscription marked as unsubscribed');
-    } catch (error) {
-      console.error('❌ Error unsubscribing from bus:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Cancel a pending subscription - Completely removes it from database
-   */
-  static async cancelPendingSubscription(userId: string, busId: string): Promise<void> {
-    try {
-      console.log(`❌ Canceling pending subscription for user ${userId} from bus ${busId}`);
       
-      // Get current user data
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        throw new Error('User not found');
-      }
-
-      const userData = userDoc.data();
-      const currentAssignments = userData.busAssignments || [];
-
-      // Find the pending subscription
-      const pendingSubscription = currentAssignments.find(
-        (assignment: any) => 
-          assignment.busId === busId && 
-          assignment.status === 'active' && 
-          assignment.paymentStatus === 'pending'
-      );
-
-      if (!pendingSubscription) {
-        throw new Error('Pending subscription not found');
-      }
-
-      // Get bus data
-      const busRef = doc(db, 'buses', busId);
-      const busDoc = await getDoc(busRef);
-      
-      if (!busDoc.exists()) {
-        throw new Error('Bus not found');
-      }
-
-      const now = new Date().toISOString();
-
-      // COMPLETELY REMOVE the subscription from user's busAssignments
-      await updateDoc(userRef, {
-        busAssignments: arrayRemove(pendingSubscription),
-        updatedAt: now
-      });
-
-      console.log(`✅ Completely removed pending subscription from user data`);
-
-      // Remove user from bus currentRiders if they're there
       const busData = busDoc.data();
-      const isInCurrentRiders = busData.currentRiders?.includes(userId) || false;
+      const currentRiders = busData.currentRiders || [];
       
-      if (isInCurrentRiders) {
-        await updateDoc(busRef, {
-          currentRiders: arrayRemove(userId),
-          updatedAt: now
-        });
-        console.log(`✅ Removed user from bus currentRiders`);
+      // Find the rider in currentRiders
+      const riderIndex = currentRiders.findIndex((rider: any) => 
+        rider.id === userId || rider.userId === userId
+      );
+      
+      if (riderIndex === -1) {
+        throw new Error('Rider not found in bus currentRiders');
       }
-
-      // Remove user from bus subscribers if they're there
-      const isInSubscribers = busData.subscribers?.some((sub: any) => 
-        (typeof sub === 'string' ? sub === userId : sub.userId === userId)
-      ) || false;
       
-      if (isInSubscribers) {
-        // Find the subscriber object to remove
-        const subscriberToRemove = busData.subscribers.find((sub: any) => 
-          typeof sub === 'string' ? sub === userId : sub.userId === userId
-        );
-        
-        if (subscriberToRemove) {
-          await updateDoc(busRef, {
-            subscribers: arrayRemove(subscriberToRemove),
-            updatedAt: now
-          });
-          console.log(`✅ Removed user from bus subscribers`);
+      const rider = currentRiders[riderIndex];
+      const now = new Date().toISOString();
+      
+      // ✅ NEW: Handle payment status with expiration tracking
+      if (paymentStatus === 'paid') {
+        // Calculate expiration time based on subscription type
+        const paidAt = new Date();
+        let expiresAt: Date;
+
+        if (rider.subscriptionType === 'per_ride') {
+          // Expires in 24 hours
+          expiresAt = new Date(paidAt.getTime() + (24 * 60 * 60 * 1000));
+          console.log(`⏰ Per-ride payment will expire in 24 hours: ${expiresAt.toISOString()}`);
+        } else if (rider.subscriptionType === 'monthly') {
+          // Expires in 30 days
+          expiresAt = new Date(paidAt.getTime() + (30 * 24 * 60 * 60 * 1000));
+          console.log(`📅 Monthly payment will expire in 30 days: ${expiresAt.toISOString()}`);
+        } else {
+          throw new Error('Invalid subscription type for expiration calculation');
         }
-      }
 
-      console.log('✅ Successfully canceled pending subscription - completely removed from database');
+        // Update rider with payment tracking
+        currentRiders[riderIndex] = {
+          ...rider,
+          paymentStatus: 'paid',
+          paidAt: now,
+          expiresAt: expiresAt.toISOString()
+        };
+
+      } else {
+        // For unpaid/pending, clear payment tracking
+        currentRiders[riderIndex] = {
+          ...rider,
+          paymentStatus: paymentStatus,
+          paidAt: undefined,
+          expiresAt: undefined
+        };
+      }
+      
+      // Update bus document
+      await updateDoc(busRef, {
+        currentRiders: currentRiders,
+        updatedAt: now
+      });
+      
+      console.log(`✅ Payment status updated successfully: ${paymentStatus}`);
+      
     } catch (error) {
-      console.error('❌ Error canceling pending subscription:', error);
+      console.error('❌ Error updating payment status:', error);
       throw error;
     }
   }
 
   /**
-   * Check if user is subscribed to a specific bus (active subscription only)
-   */
-  static async isSubscribedToBus(userId: string, busId: string): Promise<boolean> {
-    try {
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        return false;
-      }
-
-      const userData = userDoc.data();
-      const busAssignments = userData.busAssignments || [];
-
-      return busAssignments.some((assignment: any) => 
-        assignment.busId === busId && assignment.status === 'active'
-      );
-    } catch (error) {
-      console.error('Error checking subscription status:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Get user subscriptions with validation against bus currentRiders
+   * ✅ UPDATED: Get user subscriptions by searching ALL buses for user in currentRiders
    */
   static async getUserSubscriptions(userId: string): Promise<SubscriptionData[]> {
     try {
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
+      console.log(`🔍 Finding subscriptions for user ${userId} by searching all buses...`);
       
-      if (!userDoc.exists()) {
-        return [];
-      }
-
-      const userData = userDoc.data();
-      const busAssignments = userData.busAssignments || [];
+      // ✅ NEW APPROACH: Find user subscriptions by searching through ALL buses
+      // This is more efficient than the user having references
+      const subscriptions: SubscriptionData[] = [];
       
-      // Return ALL subscriptions without validation - let the UI handle display logic
-      const validSubscriptions: SubscriptionData[] = [];
+      // Get all buses and check if user is in their currentRiders
+      const busesSnapshot = await getDocs(collection(db, 'buses'));
       
-      for (const assignment of busAssignments) {
-        // Skip if assignment is not a proper object
-        if (typeof assignment === 'string' || !assignment.busId) {
-          continue;
-        }
+      for (const busDoc of busesSnapshot.docs) {
+        const busData = busDoc.data();
+        const currentRiders = busData.currentRiders || [];
         
-        // Include ALL subscriptions regardless of currentRiders status
-        validSubscriptions.push(assignment as SubscriptionData);
+        // Find this user in currentRiders
+        const userRiderData = currentRiders.find((rider: any) => rider.id === userId);
+        
+        if (userRiderData) {
+          // Convert currentRider format to SubscriptionData format
+          const subscriptionData: SubscriptionData = {
+            busId: userRiderData.busId,
+            locationId: userRiderData.locationId,
+            subscriptionType: userRiderData.subscriptionType,
+            paymentStatus: userRiderData.paymentStatus,
+            status: userRiderData.status, // active or inactive
+            assignedAt: userRiderData.assignedAt,
+            startDate: userRiderData.startDate,
+            endDate: userRiderData.endDate,
+            updatedAt: userRiderData.updatedAt,
+            qrCode: userRiderData.qrCode,
+            subscriptionId: userRiderData.subscriptionId,
+            subscriberName: userRiderData.subscriberName,
+            subscriberEmail: userRiderData.subscriberEmail
+          };
+          
+          subscriptions.push(subscriptionData);
+          console.log(`✅ Found subscription for user in bus: ${busDoc.id}`);
+        }
       }
       
-      console.log(`📋 Found ${validSubscriptions.length} subscriptions for user ${userId}`);
-      return validSubscriptions;
+      console.log(`📱 Found ${subscriptions.length} subscriptions by searching currentRiders`);
+      return subscriptions;
     } catch (error) {
       console.error('Error getting user subscriptions:', error);
       return [];
@@ -445,107 +317,262 @@ export class SubscriptionService {
   }
 
   /**
-   * Get user's active subscriptions only
+   * ✅ FIXED: QR code access based on payment status (not subscription status)
    */
-  static async getActiveUserSubscriptions(userId: string): Promise<SubscriptionData[]> {
+  static async canAccessQRCode(userId: string, busId: string): Promise<boolean> {
     try {
-      const allSubscriptions = await this.getUserSubscriptions(userId);
-      return allSubscriptions.filter(sub => sub.status === 'active');
-    } catch (error) {
-      console.error('Error fetching active user subscriptions:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Check if subscription is active (paid, not expired, and status is active)
-   */
-  static isSubscriptionActive(subscription: SubscriptionData): boolean {
-    // Check status first
-    if (subscription.status !== 'active') {
-      return false;
-    }
-
-    // Check payment status
-    if (subscription.paymentStatus !== 'paid') {
-      return false;
-    }
-
-    // Check expiration for monthly subscriptions
-    if (subscription.subscriptionType === 'monthly' && subscription.endDate) {
-      const endDate = new Date(subscription.endDate);
-      const now = new Date();
-      return endDate > now;
-    }
-
-    return true;
-  }
-
-  /**
-   * Real-time subscription validation - checks both user data AND bus subscriber list
-   */
-  static async validateSubscriptionStatus(userId: string, busId: string): Promise<{
-    isSubscribed: boolean;
-    isActive: boolean;
-    subscription?: SubscriptionData;
-    reason?: string;
-  }> {
-    try {
-      // Check user's subscription data
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        return { isSubscribed: false, isActive: false, reason: 'User not found' };
-      }
-
-      const userData = userDoc.data();
-      const userSubscription = userData.busAssignments?.find(
-        (assignment: any) => assignment.busId === busId && assignment.status === 'active'
-      );
-
-      // Check bus's subscriber list
       const busRef = doc(db, 'buses', busId);
       const busDoc = await getDoc(busRef);
       
       if (!busDoc.exists()) {
-        return { isSubscribed: false, isActive: false, reason: 'Bus not found' };
+        return false;
       }
 
       const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
       
-      // FIX: Check if user is in currentRiders (handle both string IDs and objects)
-      const isInBusRiders = busData.currentRiders?.some((rider: any) => {
-        if (typeof rider === 'string') {
-          return rider === userId;
-        } else if (typeof rider === 'object' && rider.id) {
-          return rider.id === userId;
-        }
+      const rider = currentRiders.find((rider: any) => rider.id === userId);
+      
+      if (!rider) {
         return false;
-      }) || false;
-
-      // Cross-validate: user must be in both lists for active subscription
-      const isSubscribed = !!userSubscription && isInBusRiders;
-      
-      if (!isSubscribed && userSubscription) {
-        console.log(`⚠️ User ${userId} has subscription but not in bus currentRiders`);
       }
 
-      // Check if subscription is active
-      const isActive = userSubscription ? this.isSubscriptionActive(userSubscription) : false;
+      // ✅ FIXED: QR access based on payment status AND subscription status
+      return rider.status === 'active' && rider.paymentStatus === 'paid';
+    } catch (error) {
+      console.error('Error checking QR code access:', error);
+      return false;
+    }
+  }
+
+  /**
+   * ✅ UPDATED: Get QR code from currentRiders
+   */
+  static async getSubscriptionQRCode(userId: string, busId: string): Promise<string | null> {
+    try {
+      const canAccess = await this.canAccessQRCode(userId, busId);
+      if (!canAccess) {
+        return null;
+      }
+
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
       
-      return {
-        isSubscribed: !!userSubscription,
-        isActive,
-        subscription: userSubscription,
-        reason: userSubscription ? 
-          (isActive ? 'Active subscription' : 'Subscription expired or payment pending') :
-          'No active subscription found'
-      };
+      if (!busDoc.exists()) {
+        return null;
+      }
+
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+      
+      const rider = currentRiders.find((rider: any) => rider.id === userId);
+      
+      return rider?.qrCode || null;
+    } catch (error) {
+      console.error('Error getting QR code:', error);
+      return null;
+    }
+  }
+
+  /**
+   * ✅ FIXED: Unsubscribe - set status to 'inactive' instead of removing
+   */
+  static async unsubscribeFromBus(userId: string, busId: string): Promise<void> {
+    try {
+      console.log(`🚌 Starting unsubscription process for user ${userId} from bus ${busId}`);
+      
+      // Get bus data
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        throw new Error('Bus not found');
+      }
+
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+      
+      const riderIndex = currentRiders.findIndex((rider: any) => rider.id === userId);
+      
+      if (riderIndex === -1) {
+        throw new Error('User not found in current riders');
+      }
+
+      const riderToUpdate = currentRiders[riderIndex];
+      const now = new Date().toISOString();
+
+      // ✅ FIXED: For unpaid/pending - completely remove, for paid - set to inactive
+      if (riderToUpdate.paymentStatus === 'unpaid' || riderToUpdate.paymentStatus === 'pending') {
+        console.log(`🗑️ Removing ${riderToUpdate.paymentStatus} subscription completely`);
+        
+        // Remove completely
+        await updateDoc(busRef, {
+          currentRiders: arrayRemove(riderToUpdate),
+          updatedAt: now
+        });
+
+        console.log('✅ Completely removed unpaid/pending subscription');
+        
+      } else {
+        // For paid subscriptions: Set status to 'inactive' (keep for history)
+        console.log(`📝 Setting paid subscription to inactive`);
+        
+        const updatedRiders = [...currentRiders];
+        updatedRiders[riderIndex] = {
+          ...riderToUpdate,
+          status: 'inactive', // ✅ Set to inactive instead of removing
+          unsubscribedAt: now,
+          updatedAt: now
+        };
+
+        await updateDoc(busRef, {
+          currentRiders: updatedRiders,
+          updatedAt: now
+        });
+
+        console.log('✅ Set paid subscription to inactive status');
+      }
 
     } catch (error) {
-      console.error('Error validating subscription status:', error);
-      return { isSubscribed: false, isActive: false, reason: 'Validation error' };
+      console.error('❌ Error unsubscribing from bus:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ✅ FIXED: Cancel subscription - completely remove from currentRiders only
+   */
+  static async cancelPendingSubscription(userId: string, busId: string): Promise<void> {
+    try {
+      console.log(`❌ Canceling subscription for user ${userId} from bus ${busId}`);
+      
+      // ✅ NEW LOGIC: Only work with bus currentRiders array
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        throw new Error('Bus not found');
+      }
+
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+      
+      // ✅ Find the rider in currentRiders array (as object, not string)
+      const riderToRemove = currentRiders.find((rider: any) => rider.id === userId);
+
+      if (!riderToRemove) {
+        throw new Error('Subscription not found');
+      }
+
+      console.log(`🔍 Found rider to cancel:`, {
+        name: riderToRemove.name,
+        status: riderToRemove.status,
+        paymentStatus: riderToRemove.paymentStatus,
+        subscriptionType: riderToRemove.subscriptionType
+      });
+
+      const now = new Date().toISOString();
+
+      // ✅ SIMPLE: Just remove from currentRiders (no matter what payment status)
+      await updateDoc(busRef, {
+        currentRiders: arrayRemove(riderToRemove),
+        updatedAt: now
+      });
+
+      console.log(`✅ Completely removed rider from currentRiders`);
+      console.log('✅ Successfully canceled subscription - completely removed from database');
+    } catch (error) {
+      console.error('❌ Error canceling subscription:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ✅ FIXED: Check subscription status from currentRiders only
+   */
+  static async isSubscribedToBus(userId: string, busId: string): Promise<boolean> {
+    try {
+      // ✅ Check bus currentRiders instead of user busAssignments
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        return false;
+      }
+
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+
+      // Find user in currentRiders with active status
+      const rider = currentRiders.find((rider: any) => 
+        rider.id === userId && rider.status === 'active'
+      );
+
+      return !!rider;
+    } catch (error) {
+      console.error('Error checking subscription status:', error);
+      return false;
+    }
+  }
+
+  /**
+   * ✅ FIXED: Validate subscription from currentRiders only
+   */
+  static async validateSubscriptionStatus(userId: string, busId: string): Promise<{
+    isSubscribed: boolean;
+    isActive: boolean;
+    subscription?: any;
+    reason?: string;
+  }> {
+    try {
+      // ✅ Check from bus currentRiders (single source of truth)
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        return { 
+          isSubscribed: false, 
+          isActive: false, 
+          reason: 'Bus not found' 
+        };
+      }
+
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+      
+      const rider = currentRiders.find((rider: any) => rider.id === userId);
+      
+      if (!rider) {
+        return { 
+          isSubscribed: false, 
+          isActive: false, 
+          reason: 'Not subscribed to this bus' 
+        };
+      }
+
+      const isActive = rider.status === 'active';
+
+      return {
+        isSubscribed: true,
+        isActive,
+        subscription: {
+          paymentStatus: rider.paymentStatus,
+          subscriptionType: rider.subscriptionType,
+          status: rider.status,
+          busId,
+          assignedAt: rider.assignedAt,
+          startDate: rider.startDate,
+          endDate: rider.endDate
+        },
+        reason: isActive ? 'Active subscription' : 'Inactive subscription'
+      };
+    } catch (error) {
+      console.error('Error validating subscription:', error);
+      return { 
+        isSubscribed: false, 
+        isActive: false, 
+        reason: 'Error checking subscription' 
+      };
     }
   }
 
@@ -594,97 +621,6 @@ export class SubscriptionService {
   }
 
   /**
-   * Update payment status for active subscriptions only
-   */
-  static async updatePaymentStatus(
-    userId: string, 
-    busId: string, 
-    paymentStatus: 'pending' | 'paid' | 'unpaid'
-  ): Promise<void> {
-    try {
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        throw new Error('User not found');
-      }
-
-      const userData = userDoc.data();
-      const currentAssignments = userData.busAssignments || [];
-      
-      const subscriptionToUpdate = currentAssignments.find(
-        (assignment: any) => assignment.busId === busId && assignment.status === 'active'
-      );
-
-      if (!subscriptionToUpdate) {
-        throw new Error('Active subscription not found');
-      }
-
-      const now = new Date().toISOString();
-      const updatedSubscription: SubscriptionData = {
-        ...subscriptionToUpdate,
-        paymentStatus,
-        updatedAt: now
-      };
-
-      // Remove old subscription and add updated one
-      await updateDoc(userRef, {
-        busAssignments: arrayRemove(subscriptionToUpdate),
-        updatedAt: now
-      });
-
-      await updateDoc(userRef, {
-        busAssignments: arrayUnion(updatedSubscription),
-        updatedAt: now
-      });
-
-      console.log(`Payment status updated to ${paymentStatus} for user ${userId} on bus ${busId}`);
-    } catch (error) {
-      console.error('Error updating payment status:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get QR code for active, paid subscriptions only
-   */
-  static async canAccessQRCode(userId: string, busId: string): Promise<boolean> {
-    try {
-      const validation = await this.validateSubscriptionStatus(userId, busId);
-      return validation.isActive && validation.subscription?.paymentStatus === 'paid';
-    } catch (error) {
-      console.error('Error checking QR code access:', error);
-      return false;
-    }
-  }
-
-  static async getSubscriptionQRCode(userId: string, busId: string): Promise<string | null> {
-    try {
-      const canAccess = await this.canAccessQRCode(userId, busId);
-      if (!canAccess) {
-        return null;
-      }
-
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        return null;
-      }
-
-      const userData = userDoc.data();
-      const subscription = userData.busAssignments?.find(
-        (assignment: any) => assignment.busId === busId && assignment.status === 'active'
-      );
-
-      return subscription?.qrCode || null;
-    } catch (error) {
-      console.error('Error getting QR code:', error);
-      return null;
-    }
-  }
-
-  /**
    * Check if user has returned to bus and update subscription status accordingly
    */
   static async checkUserReturnedToBus(userId: string, busId: string): Promise<{
@@ -704,7 +640,7 @@ export class SubscriptionService {
       }
 
       const busData = busDoc.data();
-      const isUserInCurrentRiders = busData.currentRiders?.includes(userId) || false;
+      const isUserInCurrentRiders = busData.currentRiders?.some((rider: any) => rider.id === userId) || false;
       
       // Get user's subscription data
       const userRef = doc(db, 'users', userId);
@@ -832,7 +768,7 @@ export class SubscriptionService {
       }
 
       const busData = busDoc.data();
-      const isInCurrentRiders = busData.currentRiders?.includes(userId) || false;
+      const isInCurrentRiders = busData.currentRiders?.some((rider: any) => rider.id === userId) || false;
 
       console.log(`🔍 Active subscription check for user ${userId} on bus ${busId}:`, {
         hasSubscription: !!subscription,
@@ -1068,6 +1004,97 @@ export class SubscriptionService {
     } catch (error) {
       console.error('❌ Error resubscribing to bus:', error);
       throw error;
+    }
+  }
+
+  /**
+   * ✅ NEW: Cleanup function to remove busAssignments from user collection
+   */
+  static async cleanupUserBusAssignments(userId: string): Promise<void> {
+    try {
+      console.log(`🧹 Cleaning up busAssignments for user ${userId}`);
+      
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        return;
+      }
+
+      const userData = userDoc.data();
+      
+      if (userData.busAssignments && userData.busAssignments.length > 0) {
+        // Remove the entire busAssignments array
+        await updateDoc(userRef, {
+          busAssignments: [],
+          updatedAt: new Date().toISOString()
+        });
+        
+        console.log(`✅ Cleaned up ${userData.busAssignments.length} busAssignments entries`);
+      } else {
+        console.log(`✅ No busAssignments to clean up`);
+      }
+    } catch (error) {
+      console.error('Error cleaning up busAssignments:', error);
+    }
+  }
+
+  /**
+   * ✅ DEBUG: Method to check and fix any rider with wrong status
+   */
+  static async debugAndFixRiderStatus(userId: string, busId: string): Promise<void> {
+    try {
+      console.log(`🔍 DEBUG: Checking rider status for user ${userId} on bus ${busId}`);
+      
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        console.log('❌ Bus not found');
+        return;
+      }
+
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+      
+      const riderIndex = currentRiders.findIndex((rider: any) => rider.id === userId);
+      
+      if (riderIndex === -1) {
+        console.log('❌ Rider not found in currentRiders');
+        return;
+      }
+
+      const rider = currentRiders[riderIndex];
+      console.log('🔍 CURRENT RIDER DATA:', {
+        status: rider.status,
+        paymentStatus: rider.paymentStatus,
+        subscriptionId: rider.subscriptionId,
+        assignedAt: rider.assignedAt
+      });
+
+      // Fix status if it's wrong
+      if (rider.status !== 'active') {
+        console.log('🔧 FIXING STATUS: Setting to active...');
+        
+        const updatedRiders = [...currentRiders];
+        updatedRiders[riderIndex] = {
+          ...rider,
+          status: 'active',
+          updatedAt: new Date().toISOString()
+        };
+
+        await updateDoc(busRef, {
+          currentRiders: updatedRiders,
+          updatedAt: new Date().toISOString()
+        });
+
+        console.log('✅ Status fixed to active');
+      } else {
+        console.log('✅ Status is already active');
+      }
+
+    } catch (error) {
+      console.error('❌ Error in debug method:', error);
     }
   }
 } 

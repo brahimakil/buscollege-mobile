@@ -57,13 +57,7 @@ const menuItems: MenuItem[] = [
     route: 'my-subscriptions',
     roles: ['rider'],
   },
-  {
-    id: 'riders',
-    title: 'Riders',
-    icon: 'people',
-    route: 'riders',
-    roles: ['driver'],
-  },
+
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -163,6 +157,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </TouchableOpacity>
           ))}
         </ScrollView>
+
+        {/* Profile Section */}
+        <View style={[styles.profileSection, { borderTopColor: colors.border }]}>
+          <TouchableOpacity
+            style={[
+              styles.profileItem,
+              currentRoute === 'profile' && [
+                styles.activeMenuItem,
+                { backgroundColor: colors.sidebarActive + '20' }
+              ],
+            ]}
+            onPress={() => {
+              onNavigate('profile');
+              onClose();
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.profileIcon, { backgroundColor: colors.primary }]}>
+              <Ionicons 
+                name="person-circle" 
+                size={20} 
+                color={colors.textInverse} 
+              />
+            </View>
+            <View style={styles.profileInfo}>
+              <Text style={[styles.profileTitle, { color: colors.sidebarText }]}>
+                My Profile
+              </Text>
+              <Text style={[styles.profileSubtitle, { color: colors.textSecondary }]}>
+                Edit your information
+              </Text>
+            </View>
+            <Ionicons 
+              name="chevron-forward" 
+              size={16} 
+              color={colors.textSecondary} 
+            />
+          </TouchableOpacity>
+        </View>
 
         {/* Theme Toggle Section */}
         <View style={[styles.themeSection, { borderTopColor: colors.border }]}>
@@ -302,6 +335,37 @@ const styles = StyleSheet.create({
   },
   activeMenuText: {
     fontWeight: 'bold',
+  },
+  profileSection: {
+    paddingHorizontal: AppSpacing.lg,
+    paddingVertical: AppSpacing.md,
+    borderTopWidth: 1,
+  },
+  profileItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: AppSpacing.sm,
+    paddingHorizontal: AppSpacing.sm,
+    borderRadius: AppBorderRadius.md,
+  },
+  profileIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: AppBorderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: AppSpacing.md,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileTitle: {
+    fontSize: AppFontSizes.md,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  profileSubtitle: {
+    fontSize: AppFontSizes.xs,
   },
   themeSection: {
     paddingHorizontal: AppSpacing.lg,

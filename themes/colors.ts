@@ -70,74 +70,74 @@ export const AppColors = {
     inputError: '#EF4444',
   },
   dark: {
-    // Primary colors
-    primary: '#818CF8',
-    primaryLight: '#A5B4FC',
-    primaryDark: '#6366F1',
+    // Primary colors - More vibrant on dark background
+    primary: '#8B5CF6', // More vibrant purple
+    primaryLight: '#A78BFA',
+    primaryDark: '#7C3AED',
     
-    // Secondary colors
-    secondary: '#F472B6',
-    secondaryLight: '#F9A8D4',
-    secondaryDark: '#EC4899',
+    // Secondary colors - Enhanced pink
+    secondary: '#EC4899',
+    secondaryLight: '#F472B6',
+    secondaryDark: '#DB2777',
     
-    // Accent colors
-    accent: '#34D399',
-    accentLight: '#6EE7B7',
-    accentDark: '#10B981',
+    // Accent colors - Brighter green
+    accent: '#10B981',
+    accentLight: '#34D399',
+    accentDark: '#059669',
     
-    // Background colors
-    background: '#0F172A',
-    backgroundSecondary: '#1E293B',
-    backgroundTertiary: '#334155',
+    // Background colors - MUCH DARKER
+    background: '#000000', // Pure black for ultimate darkness
+    backgroundSecondary: '#0A0A0B', // Near black
+    backgroundTertiary: '#111111', // Very dark gray
     
-    // Surface colors
-    surface: '#1E293B',
-    surfaceSecondary: '#334155',
+    // Surface colors - Super dark
+    surface: '#0A0A0B',
+    surfaceSecondary: '#111111',
     
-    // Text colors
-    text: '#F1F5F9',
-    textSecondary: '#CBD5E1',
-    textTertiary: '#94A3B8',
-    textInverse: '#1E293B',
+    // Text colors - High contrast on dark
+    text: '#FFFFFF', // Pure white for maximum contrast
+    textSecondary: '#E5E7EB', // Very light gray
+    textTertiary: '#9CA3AF', // Medium light gray
+    textInverse: '#000000',
     
-    // Border colors
-    border: '#334155',
-    borderSecondary: '#475569',
+    // Border colors - Dark but visible
+    border: '#1F1F23', // Very dark border
+    borderSecondary: '#2D2D30', // Slightly lighter dark border
     
-    // Status colors
-    success: '#34D399',
-    warning: '#FBBF24',
-    error: '#F87171',
-    info: '#60A5FA',
+    // Status colors - More vibrant on dark
+    success: '#22C55E', // Brighter green
+    warning: '#F59E0B', // Bright orange
+    error: '#EF4444', // Bright red
+    info: '#3B82F6', // Bright blue
     
-    // Card colors
-    card: '#1E293B',
-    cardShadow: 'rgba(0, 0, 0, 0.3)',
+    // Card colors - Deep dark
+    card: '#0A0A0B',
+    cardShadow: 'rgba(0, 0, 0, 0.9)', // Much stronger shadow
     
-    // Sidebar colors
-    sidebarBackground: '#0F172A',
-    sidebarText: '#CBD5E1',
-    sidebarActive: '#818CF8',
-    sidebarActiveBackground: 'rgba(129, 140, 248, 0.15)',
+    // Sidebar colors - Ultra dark
+    sidebarBackground: '#000000', // Pure black sidebar
+    sidebarText: '#E5E7EB',
+    sidebarActive: '#8B5CF6',
+    sidebarActiveBackground: 'rgba(139, 92, 246, 0.2)', // More visible active state
     
-    // Additional UI colors
+    // Additional UI colors - Enhanced for dark
     shadow: '#000000',
-    overlay: 'rgba(0, 0, 0, 0.7)',
-    disabled: '#64748B',
-    placeholder: '#64748B',
-    divider: '#334155',
+    overlay: 'rgba(0, 0, 0, 0.95)', // Much darker overlay
+    disabled: '#4B5563', // Darker disabled state
+    placeholder: '#6B7280', // Darker placeholder
+    divider: '#1F1F23', // Very dark divider
     
-    // Button colors
-    buttonPrimary: '#818CF8',
-    buttonSecondary: '#334155',
-    buttonDanger: '#F87171',
-    buttonSuccess: '#34D399',
+    // Button colors - More vibrant
+    buttonPrimary: '#8B5CF6',
+    buttonSecondary: '#1F1F23', // Very dark secondary button
+    buttonDanger: '#EF4444',
+    buttonSuccess: '#22C55E',
     
-    // Input colors
-    inputBackground: '#1E293B',
-    inputBorder: '#334155',
-    inputFocus: '#818CF8',
-    inputError: '#F87171',
+    // Input colors - Ultra dark
+    inputBackground: '#0A0A0B', // Almost black input
+    inputBorder: '#1F1F23', // Dark border
+    inputFocus: '#8B5CF6', // Vibrant focus
+    inputError: '#EF4444',
   },
 };
 
@@ -196,23 +196,23 @@ export const AppShadows = {
     sm: {
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.3,
-      shadowRadius: 2,
-      elevation: 1,
+      shadowOpacity: 0.8, // Much stronger shadow
+      shadowRadius: 3,
+      elevation: 2,
     },
     md: {
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.4,
-      shadowRadius: 6,
-      elevation: 3,
+      shadowOpacity: 0.9, // Very strong shadow
+      shadowRadius: 8,
+      elevation: 4,
     },
     lg: {
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.5,
-      shadowRadius: 15,
-      elevation: 5,
+      shadowOpacity: 0.95, // Ultra strong shadow
+      shadowRadius: 20,
+      elevation: 8,
     },
   },
 };

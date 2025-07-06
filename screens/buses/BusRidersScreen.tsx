@@ -22,6 +22,7 @@ import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { AppBorderRadius, AppFontSizes, AppSpacing, getThemeShadow } from '../../themes/colors';
+import { SubscriptionService } from '../../services/SubscriptionService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -64,15 +65,16 @@ interface BusData {
   busName: string;
   busLabel: string;
   maxCapacity: number;
-  currentRiders: BusRiderObject[];
-  subscribers?: Array<{
-    userId: string;
-    name: string;
+  currentRiders: Array<{
+    id: string;
     email: string;
-    subscribedAt: string;
+    name: string;
     paymentStatus: 'paid' | 'unpaid' | 'pending';
-    status: 'active' | 'unsubscribed';
+    status: 'active' | 'inactive';
+    subscriptionType: 'monthly' | 'per_ride';
+    // ... other fields
   }>;
+  // ✅ REMOVED: subscribers array no longer exists
   pricePerMonth: number;
   pricePerRide: number;
   driverId: string;
@@ -95,10 +97,8 @@ export const BusRidersScreen: React.FC = () => {
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const fetchBusAndRiders = useCallback(async (options?: { background?: boolean }) => {
-    if (!busId || !userData?.uid) return;
-
-    if (!options?.background) {
+  const fetchBusAndRiders = useCallback(async (options: { background?: boolean } = {}) => {
+    if (!options.background) {
       setLoading(true);
     }
     setError(null);
@@ -130,104 +130,64 @@ export const BusRidersScreen: React.FC = () => {
         firstRider: busData.currentRiders?.[0]
       });
 
-      // CRITICAL FIX: Only use riders from currentRiders array
-      if (!busData.currentRiders || !Array.isArray(busData.currentRiders) || busData.currentRiders.length === 0) {
-        setRiders([]);
-        return;
-      }
-
-      // Get all rider IDs from currentRiders only
-      const allRiderIds = new Set<string>();
+      // ✅ FIXED: Process currentRiders directly (no more subscribers array)
+      const processedRiders: RiderData[] = [];
       
-      busData.currentRiders.forEach((rider: any) => {
-        if (rider && typeof rider === 'object') {
-          const riderId = rider.id || rider.uid;
-          if (riderId) {
-            allRiderIds.add(riderId);
-            console.log('➕ Added current rider from bus:', riderId, rider.name);
-          }
-        } else if (typeof rider === 'string') {
-          allRiderIds.add(rider);
-          console.log('➕ Added current rider ID from bus:', rider);
-        }
-      });
-
-      const allRiderIdsArray = Array.from(allRiderIds);
-      console.log('👥 Found total unique riders:', allRiderIdsArray.length);
-      console.log('👥 Rider IDs:', allRiderIdsArray);
-
-      if (allRiderIdsArray.length === 0) {
-        setRiders([]);
-        return;
-      }
-
-      // Now fetch complete user data for all riders
-      const ridersData: RiderData[] = [];
-      const batchSize = 10;
-      
-      for (let i = 0; i < allRiderIdsArray.length; i += batchSize) {
-        const batch = allRiderIdsArray.slice(i, i + batchSize);
-        console.log(`🔍 Processing batch ${Math.floor(i/batchSize) + 1}:`, batch);
-        
-        try {
-          // Fetch complete user data
-          const usersQuery = query(
-            collection(db, 'users'),
-            where('uid', 'in', batch)
-          );
-          
-          const usersSnapshot = await getDocs(usersQuery);
-          console.log(`👤 Found ${usersSnapshot.docs.length} complete user records for batch`);
-          
-          usersSnapshot.docs.forEach(doc => {
-            const userData = doc.data();
-            const riderId = userData.uid;
+      if (busData.currentRiders && Array.isArray(busData.currentRiders)) {
+        for (const riderObj of busData.currentRiders) {
+          try {
+            // Get additional user info
+            const userRef = doc(db, 'users', riderObj.id);
+            const userDoc = await getDoc(userRef);
             
-            // Find this rider in the currentRiders array
-            const busRider = busData.currentRiders.find((r: any) => {
-              if (typeof r === 'string') return r === riderId;
-              return r.id === riderId || r.uid === riderId;
-            });
-            
-            if (!busRider) return; // Skip if not in currentRiders
-            
-            // Get payment status from bus rider data
-            let paymentStatus: 'paid' | 'unpaid' | 'pending' = 'pending';
-            if (typeof busRider === 'object' && busRider.paymentStatus) {
-              paymentStatus = busRider.paymentStatus;
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              
+              const riderData: RiderData = {
+                uid: riderObj.id,
+                email: riderObj.email || userData.email,
+                name: riderObj.name || userData.name,
+                phoneNumber: userData.phoneNumber,
+                address: userData.address,
+                profilePicture: userData.profilePicture,
+                
+                // ✅ Use data from currentRiders
+                subscriptionStatus: riderObj.status === 'active' ? 'active' : 'inactive',
+                subscriptionType: riderObj.subscriptionType || 'monthly',
+                subscriptionStartDate: riderObj.startDate || riderObj.assignedAt,
+                subscriptionEndDate: riderObj.endDate,
+                paymentStatus: riderObj.paymentStatus,
+                
+                totalRides: 0, // This would need to be tracked separately
+                lastRideDate: undefined,
+                joinedDate: riderObj.assignedAt || new Date().toISOString(),
+                isCurrentRider: riderObj.status === 'active',
+                isSubscriber: riderObj.status === 'active' && riderObj.paymentStatus === 'paid',
+                qrCode: riderObj.qrCode,
+                
+                emergencyContact: userData.emergencyContact ? {
+                  name: userData.emergencyContact.name || '',
+                  phone: userData.emergencyContact.phone || '',
+                  relationship: userData.emergencyContact.relationship || ''
+                } : undefined
+              };
+              
+              processedRiders.push(riderData);
             }
-            
-            // Create rider data object
-            ridersData.push({
-              uid: riderId,
-              email: userData.email || '',
-              name: userData.name || userData.email || 'Unknown User',
-              phoneNumber: userData.phoneNumber,
-              address: userData.address,
-              profilePicture: userData.profilePicture,
-              subscriptionStatus: 'active',
-              subscriptionType: 'per-ride',
-              totalRides: 0,
-              paymentStatus,
-              joinedDate: userData.createdAt || new Date().toISOString(),
-              isCurrentRider: true,
-              isSubscriber: false,
-              busAssignments: userData.busAssignments,
-              qrCode: userData.qrCode
-            });
-          });
-        } catch (batchError) {
-          console.error('❌ Error processing batch:', batch, batchError);
+          } catch (userError) {
+            console.error(`Error fetching user data for ${riderObj.id}:`, userError);
+          }
         }
       }
 
-      console.log('👥 Total riders processed:', ridersData.length);
-      setRiders(ridersData);
+      setRiders(processedRiders);
+      console.log(`✅ Loaded ${processedRiders.length} riders from currentRiders`);
+
     } catch (error: any) {
       console.error('❌ Error fetching bus riders:', error);
       setError('Failed to load riders. Please try again.');
     } finally {
-      if (!options?.background) {
+      if (!options.background) {
         setLoading(false);
       }
       setRefreshing(false);
@@ -391,7 +351,7 @@ export const BusRidersScreen: React.FC = () => {
   };
 
   const handleUpdatePaymentStatus = async (rider: RiderData, newStatus: 'paid' | 'unpaid' | 'pending') => {
-    // Optimistic UI update - immediately update local state
+    // Optimistic UI update
     setRiders(prevRiders => 
       prevRiders.map(r => 
         r.uid === rider.uid ? { ...r, paymentStatus: newStatus } : r
@@ -400,110 +360,36 @@ export const BusRidersScreen: React.FC = () => {
     
     setActionLoading(true);
     try {
-      const busRef = doc(db, 'buses', busId);
-      const busDoc = await getDoc(busRef);
-      
-      if (!busDoc.exists()) {
-        throw new Error('Bus not found');
-      }
+      // ✅ NEW: Use SubscriptionService for consistent updates
+      await SubscriptionService.updatePaymentStatus(rider.uid, busId, newStatus);
 
-      const busData = busDoc.data();
-      const currentRiders = busData.currentRiders || [];
-      const currentSubscribers = busData.subscribers || [];
-      
-      // Update payment status in currentRiders array
-      const updatedRiders = currentRiders.map((r: any) => {
-        if (r.id === rider.uid) {
-          return {
-            ...r,
-            paymentStatus: newStatus
-          };
-        }
-        return r;
-      });
-      
-      // FIXED: Handle subscribers array properly
-      let updatedSubscribers = [...currentSubscribers];
-      
-      const existingSubscriberIndex = currentSubscribers.findIndex((sub: any) => 
-        sub.userId === rider.uid || sub.id === rider.uid
-      );
-      
-      if (newStatus === 'paid') {
-        if (existingSubscriberIndex >= 0) {
-          // Update existing subscriber
-          updatedSubscribers[existingSubscriberIndex] = {
-            ...updatedSubscribers[existingSubscriberIndex],
-            paymentStatus: 'paid',
-            status: 'active'
-          };
-        } else {
-          // Add new subscriber
-          const subscriberData = {
-            userId: rider.uid,
-            name: rider.name,
-            email: rider.email,
-            subscribedAt: new Date().toISOString(),
-            paymentStatus: 'paid',
-            status: 'active'
-          };
-          updatedSubscribers.push(subscriberData);
-        }
-        console.log(`✅ Added/Updated ${rider.name} as PAID subscriber`);
-        
-      } else {
-        if (existingSubscriberIndex >= 0) {
-          if (newStatus === 'unpaid') {
-            // Remove from subscribers when unpaid
-            updatedSubscribers.splice(existingSubscriberIndex, 1);
-            console.log(`❌ Removed ${rider.name} from subscribers (unpaid)`);
-          } else {
-            // Update to pending
-            updatedSubscribers[existingSubscriberIndex] = {
-              ...updatedSubscribers[existingSubscriberIndex],
-              paymentStatus: 'pending',
-              status: 'active'
-            };
-            console.log(`⏳ Updated ${rider.name} to pending subscriber`);
-          }
-        }
-      }
-      
-      // Update the bus document
-      await updateDoc(busRef, {
-        currentRiders: updatedRiders,
-        subscribers: updatedSubscribers,
-        updatedAt: new Date().toISOString()
-      });
-
-      // CRITICAL: Update local bus state immediately
+      // Update local state
       if (bus) {
+        const updatedRiders = bus.currentRiders.map((r: any) => {
+          if (r.id === rider.uid) {
+            return { ...r, paymentStatus: newStatus };
+          }
+          return r;
+        });
+
         setBus({
           ...bus,
-          currentRiders: updatedRiders,
-          subscribers: updatedSubscribers
+          currentRiders: updatedRiders
+          // ✅ REMOVED: No more subscribers array
         });
       }
 
-      console.log(`🔄 PAYMENT STATUS UPDATE COMPLETE:`, {
-        riderName: rider.name,
-        newStatus,
-        totalSubscribers: updatedSubscribers.length,
-        paidSubscribers: updatedSubscribers.filter(s => s.paymentStatus === 'paid').length
-      });
+      console.log(`✅ Payment status updated to ${newStatus} for ${rider.name}`);
 
       Alert.alert(
         'Success', 
-        `Payment status updated to ${newStatus} for ${rider.name}.${
-          newStatus === 'paid' ? ' User added to subscribers!' : 
-          newStatus === 'unpaid' ? ' User removed from subscribers!' : 
-          ' User status updated to pending.'
-        }`
+        `Payment status updated to ${newStatus} for ${rider.name}`
       );
+      
       setShowPaymentModal(false);
       setSelectedRider(null);
       
-      // FORCE REFRESH: Refresh the data to ensure everything is in sync
+      // Refresh data
       setTimeout(() => {
         fetchBusAndRiders({ background: true });
       }, 500);

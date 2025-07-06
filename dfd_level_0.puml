@@ -1,0 +1,49 @@
+@startuml DFD_Level_0
+!define ENTITY_COLOR LightBlue
+!define SYSTEM_COLOR LightGreen
+!define DATASTORE_COLOR LightYellow
+
+skinparam rectangle {
+    BackgroundColor ENTITY_COLOR
+    BorderColor Black
+}
+
+skinparam database {
+    BackgroundColor DATASTORE_COLOR
+    BorderColor Black
+}
+
+skinparam circle {
+    BackgroundColor SYSTEM_COLOR
+    BorderColor Black
+}
+
+' External Entities
+rectangle "Admin" as admin
+rectangle "Driver" as driver
+rectangle "Rider" as rider
+
+' System
+circle "Bus College\nMobile System" as system
+
+' Data Stores
+database "Firebase\nDatabase" as db
+
+' Data Flows - Admin
+admin --> system : "User Management\nBus Configuration\nSystem Administration"
+system --> admin : "System Reports\nUser Status\nBus Analytics"
+
+' Data Flows - Driver
+driver --> system : "Bus Status Updates\nRoute Information\nRider Management"
+system --> driver : "Assigned Routes\nRider Lists\nSchedule Updates"
+
+' Data Flows - Rider
+rider --> system : "Registration\nSubscription Requests\nLocation Preferences"
+system --> rider : "Bus Schedules\nQR Codes\nSubscription Status"
+
+' System to Database
+system <--> db : "User Data\nBus Information\nSubscriptions\nLocation Data"
+
+title Bus College Mobile System - DFD Level 0 (Context Diagram)
+
+@enduml 

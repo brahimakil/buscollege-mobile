@@ -1,16 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SubscriptionModal } from '../../components/modals/SubscriptionModal';
 import { db } from '../../config/firebase';
@@ -63,6 +63,15 @@ interface Bus {
   pricePerRide: number;
   updatedAt: any;
   workingDays: WorkingDays;
+}
+
+// ✅ UPDATED: Enhanced subscription state interface to include payment status
+interface SubscriptionState {
+  isSubscribed: boolean;
+  canResubscribe: boolean;
+  subscriptionType: 'active' | 'ended' | 'none';
+  paymentStatus?: 'paid' | 'pending' | 'unpaid'; // ✅ NEW: Track payment status
+  hasUnpaidSubscription?: boolean; // ✅ NEW: Flag for unpaid subs that need special handling
 }
 
 // Updated BusCardHeader with theme support
@@ -126,9 +135,7 @@ const LocationStop = React.memo(({ location, index, isFirst, isLast, showLine }:
         <Text style={[styles.stopTime, { color: colors.textSecondary }]}>
           {location.arrivalTimeFrom || '--:--'} - {location.arrivalTimeTo || '--:--'}
         </Text>
-        <Text style={[styles.stopAddress, { color: colors.textTertiary }]}>
-          {location.city || 'Unknown City'}, {location.area || 'Unknown Area'}
-        </Text>
+      
       </View>
     </View>
   );
@@ -169,89 +176,77 @@ export const AllBusesScreen: React.FC = () => {
     bus: Bus | null;
   }>({ visible: false, bus: null });
   
-  // Update subscription states to include more detailed info
-  const [subscriptionStates, setSubscriptionStates] = useState<Map<string, {
-    isSubscribed: boolean;
-    canResubscribe: boolean;
-    subscriptionType: 'active' | 'ended' | 'none';
-  }>>(new Map());
+  // ✅ UPDATED: Enhanced subscription states
+  const [subscriptionStates, setSubscriptionStates] = useState<Map<string, SubscriptionState>>(new Map());
   
-  // Enhanced function to get detailed subscription status (NOW userData is available)
-  const getSubscriptionStatus = useCallback(async (busId: string): Promise<{
-    isSubscribed: boolean;
-    canResubscribe: boolean;
-    subscriptionType: 'active' | 'ended' | 'none';
-  }> => {
-    if (!userData?.uid) return { isSubscribed: false, canResubscribe: false, subscriptionType: 'none' };
+  // ✅ FIXED: Enhanced function to handle different payment statuses correctly
+  const getSubscriptionStatus = useCallback(async (busId: string): Promise<SubscriptionState> => {
+    if (!userData?.uid) return { 
+      isSubscribed: false, 
+      canResubscribe: false, 
+      subscriptionType: 'none' 
+    };
     
     try {
       console.log(`🔍 Checking subscription status for bus ${busId} and user ${userData.uid}`);
       
-      const subscriptions = await SubscriptionService.getUserSubscriptions(userData.uid);
-      console.log(`📋 Found ${subscriptions.length} total subscriptions for user`);
+      // ✅ NEW: Get bus data to check currentRiders (single source of truth)
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
       
-      // Find ALL subscriptions for this bus and get the most recent active one
-      const busSubscriptions = subscriptions.filter(sub => sub.busId === busId);
-      console.log(`🚌 Found ${busSubscriptions.length} subscriptions for bus ${busId}`);
-      
-      if (busSubscriptions.length === 0) {
-        console.log(`❌ No subscriptions found for bus ${busId}`);
+      if (!busDoc.exists()) {
+        console.log(`❌ Bus ${busId} not found`);
         return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
       }
-
-      // Find the most recent active subscription
-      const activeSubscription = busSubscriptions
-        .filter(sub => sub.status === 'active')
-        .sort((a, b) => new Date(b.assignedAt || b.startDate).getTime() - new Date(a.assignedAt || a.startDate).getTime())[0];
       
-      console.log(`🎯 Active subscription found:`, !!activeSubscription);
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
       
-      if (activeSubscription) {
-        console.log(`✅ Active subscription details:`, {
-          id: activeSubscription.subscriptionId,
-          status: activeSubscription.status,
-          paymentStatus: activeSubscription.paymentStatus,
-          busId: activeSubscription.busId
-        });
-
-        // Get fresh bus data to check currentRiders
-        const busRef = doc(db, 'buses', busId);
-        const busDoc = await getDoc(busRef);
-        
-        if (busDoc.exists()) {
-          const busData = busDoc.data();
-          console.log(`🚌 Bus currentRiders:`, busData.currentRiders);
-          
-          const isInCurrentRiders = busData.currentRiders?.some((rider: any) => {
-            if (typeof rider === 'string') {
-              return rider === userData.uid;
-            } else if (typeof rider === 'object' && rider.id) {
-              return rider.id === userData.uid;
-            }
-            return false;
-          }) || false;
-          
-          console.log(`🔍 Bus ${busId}: Active subscription found, in currentRiders: ${isInCurrentRiders}`);
-          
-          // ✅ FIXED LOGIC: User must be BOTH in subscription AND in currentRiders
-          if (activeSubscription.paymentStatus === 'paid' || activeSubscription.paymentStatus === 'pending') {
-            if (isInCurrentRiders) {
-              console.log(`✅ User is subscribed to bus ${busId} (payment status: ${activeSubscription.paymentStatus})`);
-              return { isSubscribed: true, canResubscribe: false, subscriptionType: 'active' };
-            } else {
-              console.log(`⚠️ User has active subscription but NOT in currentRiders - subscription ended`);
-              return { isSubscribed: false, canResubscribe: true, subscriptionType: 'ended' };
-            }
-          } else {
-            console.log(`⚠️ User has active subscription but payment status is: ${activeSubscription.paymentStatus}`);
-            return { isSubscribed: false, canResubscribe: true, subscriptionType: 'ended' };
-          }
+      // Find this user in currentRiders array
+      const currentRider = currentRiders.find((rider: any) => {
+        if (typeof rider === 'string') {
+          return rider === userData.uid;
+        } else if (typeof rider === 'object' && rider.id) {
+          return rider.id === userData.uid;
+        }
+        return false;
+      });
+      
+      if (!currentRider) {
+        console.log(`❌ User not found in currentRiders for bus ${busId}`);
+        return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
+      }
+      
+      // ✅ FIXED LOGIC: Handle different payment statuses
+      const paymentStatus = currentRider.paymentStatus;
+      const riderStatus = currentRider.status;
+      
+      console.log(`🎯 Found rider in bus ${busId}: status=${riderStatus}, paymentStatus=${paymentStatus}`);
+      
+      if (riderStatus === 'active') {
+        if (paymentStatus === 'unpaid') {
+          // ✅ UNPAID: Show resubscribe button
+          return {
+            isSubscribed: false,
+            canResubscribe: true,
+            subscriptionType: 'ended',
+            paymentStatus: 'unpaid',
+            hasUnpaidSubscription: true
+          };
+        } else if (paymentStatus === 'paid' || paymentStatus === 'pending') {
+          // ✅ PAID/PENDING: Show "Already subscribed"
+          return {
+            isSubscribed: true,
+            canResubscribe: false,
+            subscriptionType: 'active',
+            paymentStatus: paymentStatus
+          };
         }
       }
       
-      // No active subscription found, but user has previous subscriptions
-      console.log(`📝 No active subscription, but user has previous subscriptions for bus ${busId}`);
-      return { isSubscribed: false, canResubscribe: true, subscriptionType: 'ended' };
+      // Default: Not subscribed
+      return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
+      
     } catch (error) {
       console.error('Error checking subscription:', error);
       return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
@@ -496,6 +491,68 @@ export const AllBusesScreen: React.FC = () => {
     }
   }, [userData?.uid, subscriptionModal.bus, subscriptionStates, fetchBuses, loadSubscriptionStates]);
 
+  // ✅ NEW: Handle resubscribe for unpaid subscriptions
+  const handleResubscribeUnpaid = useCallback(async (bus: Bus) => {
+    if (!userData?.uid) return;
+
+    Alert.alert(
+      'Resubscribe to Bus',
+      `⚠️ Warning: You have an unpaid subscription to ${bus.busName}.\n\nResubscribing will completely remove your current subscription and create a new one with "pending" payment status.\n\nDo you want to continue?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Resubscribe',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log(`🔄 Resubscribing user ${userData.uid} to bus ${bus.id} - removing unpaid subscription`);
+              
+              // ✅ STEP 1: Completely remove old currentRider entry
+              const busRef = doc(db, 'buses', bus.id);
+              const busDoc = await getDoc(busRef);
+              
+              if (busDoc.exists()) {
+                const busData = busDoc.data();
+                const currentRiders = busData.currentRiders || [];
+                
+                // Remove this user from currentRiders
+                const filteredRiders = currentRiders.filter((rider: any) => {
+                  if (typeof rider === 'string') {
+                    return rider !== userData.uid;
+                  } else if (typeof rider === 'object' && rider.id) {
+                    return rider.id !== userData.uid;
+                  }
+                  return true;
+                });
+                
+                // Update bus with filtered riders
+                await updateDoc(busRef, {
+                  currentRiders: filteredRiders,
+                  updatedAt: new Date().toISOString()
+                });
+                
+                console.log(`✅ Removed old unpaid subscription from bus ${bus.id}`);
+                
+                // ✅ STEP 2: Wait a moment for database consistency
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // ✅ STEP 3: Show subscription modal for new subscription
+                setSubscriptionModal({ visible: true, bus });
+                
+                console.log(`✅ Opening subscription modal for fresh subscription`);
+              }
+              
+            } catch (error) {
+              console.error('Error resubscribing:', error);
+              Alert.alert('Error', 'Failed to resubscribe. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  }, [userData?.uid]);
+
+  // Enhanced handleUnsubscribe with better state refresh
   const handleUnsubscribe = useCallback(async (bus: Bus) => {
     if (!userData?.uid) return;
 
@@ -532,7 +589,7 @@ export const AllBusesScreen: React.FC = () => {
     );
   }, [userData?.uid, fetchBuses, getSubscriptionStatus]);
 
-  // Updated renderBusCard without hooks inside
+  // ✅ UPDATED: Enhanced renderBusCard with new payment status logic
   const renderBusCard = useCallback((bus: Bus) => {
     const subscriptionState = subscriptionStates.get(bus.id) || { 
       isSubscribed: false, 
@@ -550,9 +607,9 @@ export const AllBusesScreen: React.FC = () => {
         return;
       }
 
-      // Check if user can subscribe/resubscribe
+      // ✅ FIXED: Handle different subscription states
       if (subscriptionState.isSubscribed) {
-        // Show unsubscribe option
+        // ✅ PAID/PENDING: Show unsubscribe option
         Alert.alert(
           'Already Subscribed',
           `You are currently subscribed to ${bus.busName}. Would you like to unsubscribe?`,
@@ -565,22 +622,48 @@ export const AllBusesScreen: React.FC = () => {
             }
           ]
         );
+      } else if (subscriptionState.hasUnpaidSubscription) {
+        // ✅ UNPAID: Show resubscribe with warning
+        handleResubscribeUnpaid(bus);
       } else if (subscriptionState.canResubscribe) {
-        // Allow subscription/resubscription
+        // ✅ NEW SUBSCRIPTION: Normal subscription flow
         setSubscriptionModal({ visible: true, bus });
       } else {
         Alert.alert('Cannot Subscribe', 'Unable to subscribe to this bus route at the moment.');
       }
     };
 
-    // Determine button appearance and text
+    // ✅ UPDATED: Enhanced button configuration with payment status
     const getButtonConfig = () => {
       if (subscriptionState.isSubscribed) {
+        if (subscriptionState.paymentStatus === 'paid') {
+          return {
+            text: 'Subscribed (Paid)',
+            icon: 'checkmark-circle' as const,
+            backgroundColor: colors.success,
+            borderColor: colors.success,
+          };
+        } else if (subscriptionState.paymentStatus === 'pending') {
+          return {
+            text: 'Subscribed (Pending)',
+            icon: 'time' as const,
+            backgroundColor: colors.warning,
+            borderColor: colors.warning,
+          };
+        } else {
+          return {
+            text: 'Subscribed',
+            icon: 'checkmark-circle' as const,
+            backgroundColor: colors.success,
+            borderColor: colors.success,
+          };
+        }
+      } else if (subscriptionState.hasUnpaidSubscription) {
         return {
-          text: 'Subscribed',
-          icon: 'checkmark-circle' as const,
-          backgroundColor: colors.success,
-          borderColor: colors.success,
+          text: 'Resubscribe (Unpaid)',
+          icon: 'refresh-circle' as const,
+          backgroundColor: colors.error,
+          borderColor: colors.error,
         };
       } else if (subscriptionState.subscriptionType === 'ended') {
         return {
@@ -714,7 +797,8 @@ export const AllBusesScreen: React.FC = () => {
     userData,
     colors,
     isDark,
-    handleUnsubscribe
+    handleUnsubscribe,
+    handleResubscribeUnpaid // ✅ NEW dependency
   ]);
 
   // Memoized header stats

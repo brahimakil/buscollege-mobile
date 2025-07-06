@@ -83,10 +83,13 @@ export const MySubscriptionsScreen: React.FC = () => {
     try {
       setLoading(true);
       
-      // Get ALL subscriptions without filtering
+      // ✅ Clean up any old busAssignments data (one-time cleanup)
+      await SubscriptionService.cleanupUserBusAssignments(userData.uid);
+      
+      // ✅ Get subscriptions by searching all buses' currentRiders
       const subscriptions = await SubscriptionService.getUserSubscriptions(userData.uid);
       
-      console.log(`📱 Fetched ${subscriptions.length} subscriptions from service`);
+      console.log(`📱 Fetched ${subscriptions.length} subscriptions from currentRiders only`);
       
       // Fetch bus details for each subscription
       const subscriptionsWithBus = await Promise.all(
@@ -98,68 +101,33 @@ export const MySubscriptionsScreen: React.FC = () => {
             if (busDoc.exists()) {
               const busData = { id: busDoc.id, ...busDoc.data() } as Bus;
               
-              // FIX: Check if user is in currentRiders (handle both formats)
-              const isUserInBus = busData.currentRiders?.some((rider: any) => {
-                if (typeof rider === 'string') {
-                  return rider === userData.uid;
-                } else if (typeof rider === 'object' && rider.id) {
-                  return rider.id === userData.uid;
-                }
-                return false;
-              }) || false;
-              
-              console.log(`🚌 Bus ${busData.busName}: User in bus = ${isUserInBus}`);
+              console.log(`🚌 Bus ${busData.busName}:`, {
+                subscriptionStatus: subscription.status, // active or inactive
+                paymentStatus: subscription.paymentStatus,
+                canAccessQR: subscription.status === 'active'
+              });
               
               return {
                 ...subscription,
                 bus: busData,
-                isUserInBus,
-                canAccessQR: subscription.paymentStatus === 'paid' && subscription.status === 'active',
+                isUserInBus: true, // Always true since data comes from currentRiders
+                canAccessQR: subscription.status === 'active' // ✅ active status means paid
               };
             }
             
-            // If bus doesn't exist, still show subscription with placeholder
-            return {
-              ...subscription,
-              bus: {
-                id: subscription.busId,
-                busName: 'Bus Not Found',
-                driverName: 'Unknown Driver',
-                busLabel: 'N/A',
-                locations: [],
-                maxCapacity: 0,
-                currentRiders: [],
-                pricePerMonth: 0,
-                pricePerRide: 0,
-                operatingTimeFrom: '',
-                operatingTimeTo: '',
-                workingDays: {
-                  monday: false,
-                  tuesday: false,
-                  wednesday: false,
-                  thursday: false,
-                  friday: false,
-                  saturday: false,
-                  sunday: false,
-                }
-              } as Bus,
-              isUserInBus: false,
-              canAccessQR: false,
-            };
+            return null; // Skip if bus doesn't exist
           } catch (error) {
             console.error(`Error fetching bus ${subscription.busId}:`, error);
-            return {
-              ...subscription,
-              bus: undefined,
-              isUserInBus: false,
-              canAccessQR: false,
-            };
+            return null;
           }
         })
       );
       
-      console.log(`📱 Final subscriptions with bus data: ${subscriptionsWithBus.length}`);
-      setSubscriptions(subscriptionsWithBus);
+      // Filter out null entries
+      const validSubscriptions = subscriptionsWithBus.filter(sub => sub !== null);
+      
+      console.log(`📱 Final subscriptions from currentRiders only: ${validSubscriptions.length}`);
+      setSubscriptions(validSubscriptions);
     } catch (error) {
       console.error('Error fetching subscriptions:', error);
       Alert.alert('Error', 'Failed to load subscriptions');
@@ -236,27 +204,15 @@ export const MySubscriptionsScreen: React.FC = () => {
   const handleUnsubscribe = useCallback(async (subscription: SubscriptionWithBus) => {
     if (!userData?.uid) return;
 
-    // UPDATED: Only allow unsubscribing from unpaid active subscriptions
-    if (subscription.status !== 'active' || subscription.paymentStatus !== 'unpaid') {
-      if (subscription.paymentStatus === 'pending') {
-        Alert.alert(
-          'Cannot Unsubscribe', 
-          'You can only cancel pending subscriptions. Use the Cancel button instead.'
-        );
-      } else if (subscription.paymentStatus === 'paid') {
-        Alert.alert(
-          'Cannot Unsubscribe', 
-          'Payment has been confirmed by admin. Only administrators can remove confirmed subscriptions.'
-        );
-      } else {
-        Alert.alert('Cannot Unsubscribe', 'This subscription is no longer active.');
-      }
+    // ✅ FIXED: Only allow unsubscribing from active subscriptions
+    if (subscription.status !== 'active') {
+      Alert.alert('Cannot Unsubscribe', 'This subscription is not active.');
       return;
     }
 
     Alert.alert(
       'Unsubscribe',
-      `Are you sure you want to unsubscribe from ${subscription.bus?.busName || 'this bus route'}? This subscription has unpaid status.`,
+      `Are you sure you want to unsubscribe from ${subscription.bus?.busName || 'this bus route'}?`,
       [
         { text: 'Keep Subscription', style: 'cancel' },
         {
@@ -268,6 +224,7 @@ export const MySubscriptionsScreen: React.FC = () => {
               await fetchSubscriptions(); // Refresh the list
               Alert.alert('Success', 'Successfully unsubscribed from bus route');
             } catch (error: any) {
+              console.error('Error unsubscribing:', error);
               Alert.alert('Error', error.message || 'Failed to unsubscribe');
             }
           }
@@ -277,94 +234,47 @@ export const MySubscriptionsScreen: React.FC = () => {
   }, [userData?.uid, fetchSubscriptions]);
 
   const getStatusColor = (subscription: SubscriptionWithBus) => {
-    // PRIORITY 1: Check if user was removed from bus (not in currentRiders)
-    if (subscription.status === 'active' && !subscription.isUserInBus) {
-      return colors.error; // Subscription ended by admin/system
+    // ✅ FIXED: Color based on both status and payment
+    if (subscription.status === 'inactive') {
+      return colors.textSecondary; // Gray for unsubscribed
     }
-
-    // PRIORITY 2: Handle explicit unsubscribed status
-    if (subscription.status === 'unsubscribed') {
-      return colors.textSecondary;
-    }
-
-    // PRIORITY 3: Handle expired status
-    if (subscription.status === 'expired') {
-      return colors.error;
-    }
-
-    // PRIORITY 4: Handle monthly expiration (only if still in bus)
-    if (subscription.isUserInBus && subscription.subscriptionType === 'monthly' && subscription.endDate) {
-      const endDate = new Date(subscription.endDate);
-      const now = new Date();
-      
-      if (endDate < now) {
-        return colors.error; // Expired
-      } else if (endDate.getTime() - now.getTime() < 7 * 24 * 60 * 60 * 1000) {
-        return colors.warning; // Expiring soon
+    
+    if (subscription.status === 'active') {
+      switch (subscription.paymentStatus) {
+        case 'paid':
+          return colors.success; // Green for paid
+        case 'pending':
+          return colors.warning; // Orange for pending
+        case 'unpaid':
+          return colors.error; // Red for unpaid
+        default:
+          return colors.success;
       }
     }
     
-    // PRIORITY 5: Payment status (only if still in bus)
-    if (subscription.isUserInBus) {
-      switch (subscription.paymentStatus) {
-        case 'paid':
-          return colors.success;
-        case 'pending':
-          return colors.warning;
-        case 'unpaid':
-          return colors.error;
-        default:
-          return colors.textSecondary;
-      }
-    }
-
-    // Default for removed users
-    return colors.error;
+    return colors.textSecondary;
   };
 
   const getStatusText = (subscription: SubscriptionWithBus) => {
-    // PRIORITY 1: Check if user was removed from bus (not in currentRiders)
-    if (subscription.status === 'active' && !subscription.isUserInBus) {
-      return 'Subscription Ended';
+    // ✅ FIXED: Status logic based on subscription status and payment status
+    if (subscription.status === 'inactive') {
+      return 'Unsubscribed';
     }
-
-    // PRIORITY 2: Handle returned users - show payment status
-    if (subscription.status === 'active' && subscription.isUserInBus) {
+    
+    if (subscription.status === 'active') {
       switch (subscription.paymentStatus) {
         case 'paid':
-          return 'Active'; // Admin confirmed payment
+          return 'Active';
         case 'pending':
-          return 'Payment Pending'; // Waiting for admin confirmation
+          return 'Pending Payment';
         case 'unpaid':
-          return 'Payment Required'; // Admin marked as unpaid
+          return 'Payment Required';
         default:
           return 'Active';
       }
     }
-
-    // PRIORITY 3: Handle explicit unsubscribed status
-    if (subscription.status === 'unsubscribed') {
-      return 'Unsubscribed';
-    }
-
-    // PRIORITY 4: Handle expired status
-    if (subscription.status === 'expired') {
-      return 'Expired';
-    }
-
-    // PRIORITY 5: Handle monthly expiration (only if still in bus)
-    if (subscription.isUserInBus && subscription.subscriptionType === 'monthly' && subscription.endDate) {
-      const endDate = new Date(subscription.endDate);
-      const now = new Date();
-      
-      if (endDate < now) {
-        return 'Expired';
-      } else if (endDate.getTime() - now.getTime() < 7 * 24 * 60 * 60 * 1000) {
-        return 'Expiring Soon';
-      }
-    }
     
-    return 'Subscription Ended';
+    return subscription.status;
   };
 
   const formatDate = (dateString: string) => {
@@ -376,8 +286,8 @@ export const MySubscriptionsScreen: React.FC = () => {
   };
 
   const isSubscriptionActive = (subscription: SubscriptionWithBus) => {
-    // Subscription is only truly active if user is still in the bus AND meets other criteria
-    return subscription.isUserInBus && SubscriptionService.isSubscriptionActive(subscription);
+    // ✅ FIXED: Active means subscribed (regardless of payment)
+    return subscription.status === 'active';
   };
 
   const showQRCode = useCallback((subscription: SubscriptionWithBus) => {

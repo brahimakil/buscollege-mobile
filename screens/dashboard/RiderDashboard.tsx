@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View
 } from 'react-native';
 import { MapComponent } from '../../components/map/MapComponent';
@@ -381,26 +382,27 @@ export const RiderDashboard: React.FC = () => {
   }
 
   return (
-    <ScrollView 
-      style={[styles.container, { backgroundColor: colors.background }]}
-      refreshControl={
-        <RefreshControl 
-          refreshing={refreshing} 
-          onRefresh={onRefresh}
-          colors={[colors.primary]}
-          tintColor={colors.primary}
-        />
-      }
-    >
-      {/* Welcome Section */}
-      <View style={[styles.welcomeSection, { backgroundColor: colors.primary }]}>
-        <Text style={[styles.welcomeText, { color: colors.textInverse }]}>
-          Welcome back, {userData?.name}!
-        </Text>
-        <Text style={[styles.welcomeSubtext, { color: colors.textInverse }]}>
-          Here's your riding overview
-        </Text>
-      </View>
+    <View style={styles.container}>
+      <ScrollView 
+        style={[styles.scrollView, { backgroundColor: colors.background }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.surface}
+          />
+        }
+      >
+        {/* Welcome Section */}
+        <View style={[styles.welcomeSection, { backgroundColor: colors.primary }]}>
+          <Text style={[styles.welcomeText, { color: colors.textInverse }]}>
+            Welcome back, {userData?.name}!
+          </Text>
+          <Text style={[styles.welcomeSubtext, { color: colors.textInverse }]}>
+            Here's your riding overview
+          </Text>
+        </View>
           {/* Statistics Cards */}
       {/* Statistics Cards */}
       <View style={styles.statsContainer}>
@@ -507,28 +509,38 @@ export const RiderDashboard: React.FC = () => {
       </View>
           {/* Map Section */}
       {/* Map Section */}
-      {mapRoutes.length > 0 && (
-        <View style={styles.mapSection}>
+      <View style={[styles.section, { backgroundColor: colors.surface }]}>
+        <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Your Bus Routes
+            🗺️ South Lebanon Bus Routes
           </Text>
-          <View style={[
-            styles.mapContainer,
-            {
-              backgroundColor: colors.card,
-              ...getThemeShadow(isDark, 'md'),
-            }
-          ]}>
+          <TouchableOpacity
+            style={[styles.toggleButton, { backgroundColor: colors.primary }]}
+            onPress={() => setShowMap(!showMap)}
+          >
+            <Ionicons 
+              name={showMap ? 'list' : 'map'} 
+              size={16} 
+              color={colors.surface} 
+            />
+            <Text style={[styles.toggleButtonText, { color: colors.surface }]}>
+              {showMap ? 'List' : 'Map'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {showMap && (
+          <View style={styles.mapContainer}>
             <MapComponent 
-              routes={mapRoutes}
               height={300}
-              centerLat={33.8547}
-              centerLng={35.8623}
-              zoom={9}
+              centerLat={33.4}
+              centerLng={35.4}
+              zoom={10}
+              showRealTimeData={true}
             />
           </View>
-        </View>
-      )}
+        )}
+      </View>
           {/* Recent Activity */}
       {/* Recent Activity */}
       <View style={styles.activitySection}>
@@ -611,12 +623,16 @@ export const RiderDashboard: React.FC = () => {
           ))
         )}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  scrollView: {
     flex: 1,
   },
   loadingContainer: {
@@ -672,10 +688,32 @@ const styles = StyleSheet.create({
   mapSection: {
     padding: AppSpacing.lg,
   },
+  section: {
+    padding: AppSpacing.lg,
+    borderRadius: AppBorderRadius.lg,
+    marginBottom: AppSpacing.lg,
+    overflow: 'hidden',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: AppSpacing.md,
+  },
   sectionTitle: {
     fontSize: AppFontSizes.lg,
     fontWeight: 'bold',
-    marginBottom: AppSpacing.md,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: AppSpacing.xs,
+    paddingHorizontal: AppSpacing.sm,
+    borderRadius: AppBorderRadius.sm,
+  },
+  toggleButtonText: {
+    fontSize: AppFontSizes.sm,
+    marginLeft: AppSpacing.xs,
   },
   mapContainer: {
     borderRadius: AppBorderRadius.lg,

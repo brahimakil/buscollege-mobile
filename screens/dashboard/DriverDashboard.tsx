@@ -14,9 +14,12 @@ import {
   View
 } from 'react-native';
 import { MapComponent } from '../../components/map/MapComponent';
+import { QRScanner } from '../../components/qr/QRScanner';
+import { RiderInfoModal } from '../../components/qr/RiderInfoModal';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { ScannedRiderInfo } from '../../services/QRScannerService';
 import { AppBorderRadius, AppFontSizes, AppSpacing, getThemeShadow } from '../../themes/colors';
 
 const { width } = Dimensions.get('window');
@@ -26,15 +29,16 @@ interface BusData {
   busName: string;
   busLabel: string;
   maxCapacity: number;
-  currentRiders: string[];
-  subscribers: Array<{
-    userId: string;
+  currentRiders: Array<{
+    id: string;
     name: string;
     email: string;
-    subscribedAt: string;
     paymentStatus: 'paid' | 'unpaid' | 'pending';
-    status: 'active' | 'unsubscribed';
+    status: 'active' | 'inactive';
+    subscriptionType: 'monthly' | 'per_ride';
+    // ... other currentRider fields
   }>;
+  // ✅ REMOVED: subscribers array no longer exists
   pricePerMonth: number;
   pricePerRide: number;
   driverId: string;
@@ -89,6 +93,11 @@ export const DriverDashboard: React.FC = () => {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showMap, setShowMap] = useState(true);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [scannedRiderInfo, setScannedRiderInfo] = useState<ScannedRiderInfo | null>(null);
+  const [showRiderInfo, setShowRiderInfo] = useState(false);
+  // Add the missing error state
   const [error, setError] = useState<string | null>(null);
 
   // Add fallback colors in case theme isn't available
@@ -135,74 +144,66 @@ export const DriverDashboard: React.FC = () => {
     const now = new Date();
 
     buses.forEach((bus, busIndex) => {
-      // Generate rider pickup activities
-      if (bus.currentRiders && bus.currentRiders.length > 0) {
-        const pickupDate = new Date(now);
-        pickupDate.setHours(pickupDate.getHours() - Math.floor(Math.random() * 24));
-        
-        activities.push({
-          id: `pickup-${bus.id}-${busIndex}`,
-          type: 'rider_pickup',
-          description: `Picked up ${bus.currentRiders.length} riders`,
-          date: pickupDate,
-          busName: bus.busName,
-          riderCount: bus.currentRiders.length
-        });
-      }
+      // ✅ FIXED: Use currentRiders instead of subscribers
+      if (bus.currentRiders && Array.isArray(bus.currentRiders)) {
+        const activeRiders = bus.currentRiders.filter((rider: any) => 
+          rider.status === 'active'
+        );
 
-      // FIXED: Generate new subscriber activities only for PAID subscribers
-      if (bus.subscribers && bus.subscribers.length > 0) {
-        const paidSubscribers = bus.subscribers.filter((subscriber: any) => {
-          if (typeof subscriber === 'object' && subscriber.paymentStatus) {
-            return subscriber.paymentStatus === 'paid';
+        if (activeRiders.length > 0) {
+          const activityDate = new Date(now);
+          activityDate.setDate(activityDate.getDate() - Math.floor(Math.random() * 7));
+          
+          activities.push({
+            id: `pickup-${bus.id}-${busIndex}`,
+            type: 'rider_pickup',
+            description: `${activeRiders.length} rider${activeRiders.length !== 1 ? 's' : ''} picked up`,
+            date: activityDate,
+            busName: bus.busName,
+            riderCount: activeRiders.length
+          });
+        }
+
+        // ✅ FIXED: Check for new active subscriptions in currentRiders
+        const newSubscribers = bus.currentRiders.filter((rider: any) => {
+          if (rider.status === 'active') {
+            const assignedDate = new Date(rider.assignedAt || rider.startDate);
+            const daysDiff = Math.abs(now.getTime() - assignedDate.getTime()) / (1000 * 60 * 60 * 24);
+            return daysDiff <= 7; // Subscribed in last 7 days
           }
           return false;
         });
 
-        if (paidSubscribers.length > 0) {
-          const subscribeDate = new Date(now);
-          subscribeDate.setDate(subscribeDate.getDate() - Math.floor(Math.random() * 7));
+        if (newSubscribers.length > 0) {
+          const activityDate = new Date(now);
+          activityDate.setDate(activityDate.getDate() - Math.floor(Math.random() * 7));
           
           activities.push({
             id: `subscriber-${bus.id}-${busIndex}`,
             type: 'new_subscriber',
-            description: `${paidSubscribers.length} paid subscriber${paidSubscribers.length !== 1 ? 's' : ''} on ${bus.busName}`,
-            date: subscribeDate,
+            description: `${newSubscribers.length} new subscriber${newSubscribers.length !== 1 ? 's' : ''}`,
+            date: activityDate,
             busName: bus.busName
           });
         }
-      }
 
-      // Generate route completion activities
-      const routeDate = new Date(now);
-      routeDate.setHours(routeDate.getHours() - Math.floor(Math.random() * 12));
-      
-      activities.push({
-        id: `route-${bus.id}-${busIndex}`,
-        type: 'route_completed',
-        description: `Completed route for ${bus.busName}`,
-        date: routeDate,
-        busName: bus.busName
-      });
-
-      // FIXED: Generate payment activities based on PAID subscribers only
-      if (bus.subscribers && bus.subscribers.length > 0) {
-        const paidSubscribers = bus.subscribers.filter((subscriber: any) => {
-          if (typeof subscriber === 'object' && subscriber.paymentStatus) {
-            return subscriber.paymentStatus === 'paid';
+        // ✅ FIXED: Check for paid riders in currentRiders
+        const paidRiders = bus.currentRiders.filter((rider: any) => {
+          if (rider.status === 'active') {
+            return rider.paymentStatus === 'paid';
           }
           return false;
         });
 
-        if (paidSubscribers.length > 0) {
+        if (paidRiders.length > 0) {
           const paymentDate = new Date(now);
           paymentDate.setDate(paymentDate.getDate() - Math.floor(Math.random() * 30));
           
-          const estimatedEarnings = paidSubscribers.length * bus.pricePerMonth;
+          const estimatedEarnings = paidRiders.length * bus.pricePerMonth;
           activities.push({
             id: `payment-${bus.id}-${busIndex}`,
             type: 'payment_received',
-            description: `Monthly payments received from ${paidSubscribers.length} subscriber${paidSubscribers.length !== 1 ? 's' : ''}`,
+            description: `Monthly payments received from ${paidRiders.length} rider${paidRiders.length !== 1 ? 's' : ''}`,
             date: paymentDate,
             busName: bus.busName,
             amount: estimatedEarnings
@@ -220,47 +221,57 @@ export const DriverDashboard: React.FC = () => {
   const calculateStats = useCallback((buses: BusData[]) => {
     console.log('🔍 CALCULATING DASHBOARD STATS:', buses.map(bus => ({
       busName: bus.busName,
-      totalSubscribers: bus.subscribers?.length || 0,
-      subscribersArray: bus.subscribers,
-      paidSubscribers: bus.subscribers?.filter(s => s.paymentStatus === 'paid').length || 0
+      totalCurrentRiders: bus.currentRiders?.length || 0,
+      activeRiders: bus.currentRiders?.filter(r => r.status === 'active').length || 0,
+      paidRiders: bus.currentRiders?.filter(r => r.status === 'active' && r.paymentStatus === 'paid').length || 0
     })));
 
     const totalBuses = buses.length;
-    const totalRiders = buses.reduce((sum, bus) => sum + (bus.currentRiders?.length || 0), 0);
     
-    // FIXED: Only count subscribers with 'paid' payment status
-    const totalSubscribers = buses.reduce((sum, bus) => {
-      if (!bus.subscribers || !Array.isArray(bus.subscribers)) return sum;
+    // ✅ FIXED: Count active riders from currentRiders
+    const totalRiders = buses.reduce((sum, bus) => {
+      if (!bus.currentRiders || !Array.isArray(bus.currentRiders)) return sum;
       
-      const paidSubscribers = bus.subscribers.filter((subscriber: any) => 
-        subscriber.paymentStatus === 'paid'
+      const activeRiders = bus.currentRiders.filter((rider: any) => 
+        rider.status === 'active'
       );
       
-      console.log(`📊 Bus ${bus.busName}: ${paidSubscribers.length} paid subscribers out of ${bus.subscribers.length} total`);
+      return sum + activeRiders.length;
+    }, 0);
+    
+    // ✅ FIXED: Count paid riders from currentRiders (these are the real subscribers)
+    const totalSubscribers = buses.reduce((sum, bus) => {
+      if (!bus.currentRiders || !Array.isArray(bus.currentRiders)) return sum;
       
-      return sum + paidSubscribers.length;
+      const paidActiveRiders = bus.currentRiders.filter((rider: any) => 
+        rider.status === 'active' && rider.paymentStatus === 'paid'
+      );
+      
+      console.log(`📊 Bus ${bus.busName}: ${paidActiveRiders.length} paid active riders out of ${bus.currentRiders.length} total`);
+      
+      return sum + paidActiveRiders.length;
     }, 0);
     
     const expectedCapacity = buses.reduce((sum, bus) => sum + (bus.maxCapacity || 0), 0);
     
-    // FIXED: Calculate monthly earnings based on PAID subscribers only
+    // ✅ FIXED: Calculate monthly earnings based on paid active riders
     const monthlyEarnings = buses.reduce((sum, bus) => {
-      if (!bus.subscribers || !Array.isArray(bus.subscribers)) return sum;
+      if (!bus.currentRiders || !Array.isArray(bus.currentRiders)) return sum;
       
-      const paidSubscribers = bus.subscribers.filter((subscriber: any) => 
-        subscriber.paymentStatus === 'paid'
+      const paidActiveRiders = bus.currentRiders.filter((rider: any) => 
+        rider.status === 'active' && rider.paymentStatus === 'paid'
       );
       
-      return sum + (paidSubscribers.length * (bus.pricePerMonth || 0));
+      return sum + (paidActiveRiders.length * (bus.pricePerMonth || 0));
     }, 0);
 
     const occupancyRate = expectedCapacity > 0 ? Math.round((totalRiders / expectedCapacity) * 100) : 0;
 
     console.log('📊 FINAL DASHBOARD STATS:', {
       totalBuses,
-      totalRiders,
-      totalSubscribers, // Now only paid subscribers
-      monthlyEarnings, // Now based on paid subscribers only
+      totalRiders, // Active riders
+      totalSubscribers, // Paid active riders
+      monthlyEarnings, // Based on paid active riders
       expectedCapacity,
       occupancyRate
     });
@@ -398,6 +409,11 @@ export const DriverDashboard: React.FC = () => {
     }, [fetchDashboardData])
   );
 
+  const handleQRScanSuccess = (riderInfo: ScannedRiderInfo) => {
+    setScannedRiderInfo(riderInfo);
+    setShowRiderInfo(true);
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: safeColors.background }]}>
@@ -527,11 +543,27 @@ export const DriverDashboard: React.FC = () => {
       </View>
 
       {/* Map Section */}
-      {buses.length > 0 && (
-        <View style={styles.mapSection}>
+      <View style={[styles.mapSection, { backgroundColor: safeColors.surface }]}>
+        <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: safeColors.text }]}>
-            Your Bus Routes
+            🗺️ Your Routes in South Lebanon
           </Text>
+          <TouchableOpacity
+            style={[styles.toggleButton, { backgroundColor: safeColors.primary }]}
+            onPress={() => setShowMap(!showMap)}
+          >
+            <Ionicons 
+              name={showMap ? 'list' : 'map'} 
+              size={16} 
+              color={safeColors.surface} 
+            />
+            <Text style={[styles.toggleButtonText, { color: safeColors.surface }]}>
+              {showMap ? 'List' : 'Map'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {showMap && (
           <View style={[
             styles.mapContainer,
             {
@@ -542,13 +574,14 @@ export const DriverDashboard: React.FC = () => {
             <MapComponent 
               routes={busRoutes}
               height={300}
-              centerLat={33.8547}
-              centerLng={35.8623}
-              zoom={9}
+              centerLat={33.4}
+              centerLng={35.4}
+              zoom={10}
+              showRealTimeData={true}
             />
           </View>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Recent Activity */}
       <View style={styles.activitySection}>
@@ -623,6 +656,40 @@ export const DriverDashboard: React.FC = () => {
           ))
         )}
       </View>
+
+      {/* QR Scanner Button */}
+      <TouchableOpacity
+        style={[
+          styles.scannerButton,
+          {
+            backgroundColor: safeColors.primary,
+          }
+        ]}
+        onPress={() => setShowQRScanner(true)}
+      >
+        <Ionicons name="qr-code-outline" size={24} color={safeColors.textInverse} />
+        <Text style={[styles.scannerButtonText, { color: safeColors.textInverse }]}>
+          Scan QR Code
+        </Text>
+      </TouchableOpacity>
+
+      {/* QR Scanner Modal */}
+      <QRScanner
+        visible={showQRScanner}
+        onClose={() => setShowQRScanner(false)}
+        onScanSuccess={handleQRScanSuccess}
+        driverBusId={buses.length > 0 ? buses[0].id : undefined}
+      />
+
+      {/* Rider Info Modal */}
+      <RiderInfoModal
+        visible={showRiderInfo}
+        riderInfo={scannedRiderInfo}
+        onClose={() => {
+          setShowRiderInfo(false);
+          setScannedRiderInfo(null);
+        }}
+      />
     </ScrollView>
   );
 };
@@ -707,10 +774,33 @@ const styles = StyleSheet.create({
   mapSection: {
     padding: AppSpacing.lg,
   },
+  section: {
+    padding: AppSpacing.lg,
+    borderRadius: AppBorderRadius.lg,
+    marginBottom: AppSpacing.lg,
+    ...getThemeShadow(false, 'md'),
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: AppSpacing.md,
+  },
   sectionTitle: {
     fontSize: AppFontSizes.lg,
     fontWeight: 'bold',
-    marginBottom: AppSpacing.md,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: AppSpacing.sm,
+    paddingVertical: AppSpacing.xs,
+    borderRadius: AppBorderRadius.sm,
+  },
+  toggleButtonText: {
+    fontSize: AppFontSizes.sm,
+    fontWeight: '600',
+    marginLeft: AppSpacing.xs,
   },
   mapContainer: {
     borderRadius: AppBorderRadius.lg,
@@ -776,5 +866,20 @@ const styles = StyleSheet.create({
   activityAmount: {
     fontSize: AppFontSizes.md,
     fontWeight: 'bold',
+  },
+  scannerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: AppSpacing.lg,
+    paddingHorizontal: AppSpacing.xl,
+    borderRadius: AppBorderRadius.lg,
+    marginHorizontal: AppSpacing.lg,
+    marginBottom: AppSpacing.lg,
+  },
+  scannerButtonText: {
+    fontSize: AppFontSizes.lg,
+    fontWeight: 'bold',
+    marginLeft: AppSpacing.sm,
   },
 });

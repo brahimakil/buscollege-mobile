@@ -1,0 +1,93 @@
+@startuml DFD_Level_1
+!define ENTITY_COLOR LightBlue
+!define PROCESS_COLOR LightGreen
+!define DATASTORE_COLOR LightYellow
+
+skinparam rectangle {
+    BackgroundColor ENTITY_COLOR
+    BorderColor Black
+}
+
+skinparam database {
+    BackgroundColor DATASTORE_COLOR
+    BorderColor Black
+}
+
+skinparam circle {
+    BackgroundColor PROCESS_COLOR
+    BorderColor Black
+}
+
+' External Entities
+rectangle "Admin" as admin
+rectangle "Driver" as driver
+rectangle "Rider" as rider
+
+' Main Processes
+circle "1.0\nAuthentication\nProcess" as P1
+circle "2.0\nUser Management\nProcess" as P2
+circle "3.0\nBus Management\nProcess" as P3
+circle "4.0\nSubscription\nManagement\nProcess" as P4
+circle "5.0\nLocation/Route\nManagement\nProcess" as P5
+circle "6.0\nQR Code\nManagement\nProcess" as P6
+
+' Data Stores
+database "D1: Users\nCollection" as D1
+database "D2: Buses\nCollection" as D2
+database "D3: Subscriptions\nData" as D3
+database "D4: Location\nData" as D4
+
+' Authentication Process Flows
+admin --> P1 : "Login Credentials"
+driver --> P1 : "Login Credentials"
+rider --> P1 : "Login/Register Data"
+P1 --> admin : "Authentication Status"
+P1 --> driver : "Authentication Status"
+P1 --> rider : "Authentication Status"
+P1 <--> D1 : "User Credentials"
+
+' User Management Process Flows
+admin --> P2 : "User Management Commands"
+P2 --> admin : "User Status Updates"
+P2 <--> D1 : "User Data"
+P2 --> P3 : "User Role Updates"
+
+' Bus Management Process Flows
+admin --> P3 : "Bus Configuration"
+driver --> P3 : "Bus Status Updates"
+P3 --> admin : "Bus Information"
+P3 --> driver : "Assigned Routes"
+P3 <--> D2 : "Bus Data"
+P3 --> P4 : "Bus Assignments"
+
+' Subscription Management Process Flows
+rider --> P4 : "Subscription Requests"
+P4 --> rider : "Subscription Status"
+P4 <--> D3 : "Subscription Data"
+P4 --> P3 : "Rider Assignments"
+P4 --> P6 : "QR Code Requests"
+
+' Location/Route Management Process Flows
+admin --> P5 : "Route Configuration"
+driver --> P5 : "Location Updates"
+rider --> P5 : "Location Preferences"
+P5 --> driver : "Route Information"
+P5 --> rider : "Schedule Updates"
+P5 <--> D4 : "Location Data"
+P5 --> P3 : "Route Data"
+
+' QR Code Management Process Flows
+P6 --> rider : "QR Codes"
+P6 --> driver : "QR Validation"
+P6 <--> D3 : "QR Data"
+driver --> P6 : "QR Scan Data"
+
+' Inter-process data flows
+P1 --> P2 : "User Authentication"
+P2 --> P4 : "User Role Info"
+P3 --> P4 : "Bus Capacity Info"
+P4 --> P3 : "Payment Status"
+
+title Bus College Mobile System - DFD Level 1 (System Decomposition)
+
+@enduml 
