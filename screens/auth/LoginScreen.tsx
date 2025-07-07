@@ -2,15 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppBorderRadius, AppColors, AppFontSizes, AppShadows, AppSpacing } from '../../themes/colors';
@@ -24,8 +24,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState(false);
+  const [showResendButton, setShowResendButton] = useState(false);
   const [errors, setErrors] = useState<{email?: string; password?: string; general?: string}>({});
-  const { login } = useAuth();
+  const { login, resendVerificationEmail } = useAuth();
   const router = useRouter();
 
   const validateForm = () => {
@@ -53,6 +55,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
   };
 
   const showErrorNotification = (message: string) => {
+    // Check if this is an email verification error
+    if (message.includes('verify your email')) {
+      setShowResendButton(true);
+    } else {
+      setShowResendButton(false);
+    }
+    
     // Multiple notification approaches for better compatibility
     
     // 1. Set inline error message
@@ -143,9 +152,34 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
     }
   };
 
+  const handleResendVerification = async () => {
+    if (!email || !password) {
+      showErrorNotification('Please enter your email and password to resend verification email.');
+      return;
+    }
+
+    setResendingEmail(true);
+    try {
+      await resendVerificationEmail(email.trim().toLowerCase(), password);
+      Alert.alert(
+        'Verification Email Sent',
+        `A new verification email has been sent to ${email}. Please check your inbox (including spam folder) and click the verification link.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      setShowResendButton(false);
+      setErrors({});
+    } catch (error: any) {
+      const errorMessage = error.message || 'Failed to resend verification email. Please try again.';
+      showErrorNotification(errorMessage);
+    } finally {
+      setResendingEmail(false);
+    }
+  };
+
   const handleLogin = async () => {
     // Clear previous errors
     setErrors({});
+    setShowResendButton(false);
     
     if (!validateForm()) {
       return;
@@ -169,6 +203,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
     // Clear errors when user starts typing
     if (errors.email || errors.general) {
       setErrors(prev => ({ ...prev, email: undefined, general: undefined }));
+      setShowResendButton(false);
     }
   };
 
@@ -177,6 +212,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
     // Clear errors when user starts typing
     if (errors.password || errors.general) {
       setErrors(prev => ({ ...prev, password: undefined, general: undefined }));
+      setShowResendButton(false);
     }
   };
 
@@ -265,6 +301,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
               {loading ? 'Signing In...' : 'Sign In'}
             </Text>
           </TouchableOpacity>
+
+          {showResendButton && (
+            <TouchableOpacity
+              style={[styles.resendButton, resendingEmail && styles.disabledButton]}
+              onPress={handleResendVerification}
+              disabled={resendingEmail}
+            >
+              <Text style={styles.resendButtonText}>
+                {resendingEmail ? 'Resending...' : 'Resend Verification Email'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.registerSection}>
             <Text style={styles.registerText}>Don't have an account? </Text>
@@ -376,6 +424,19 @@ const styles = StyleSheet.create({
   },
   loginButtonText: {
     fontSize: AppFontSizes.lg,
+    fontWeight: 'bold',
+    color: AppColors.light.textInverse,
+  },
+  resendButton: {
+    backgroundColor: AppColors.light.secondary,
+    borderRadius: AppBorderRadius.md,
+    paddingVertical: AppSpacing.sm,
+    alignItems: 'center',
+    marginTop: AppSpacing.sm,
+    ...AppShadows.sm,
+  },
+  resendButtonText: {
+    fontSize: AppFontSizes.md,
     fontWeight: 'bold',
     color: AppColors.light.textInverse,
   },

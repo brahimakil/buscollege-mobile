@@ -214,7 +214,7 @@ export class SubscriptionService {
       const rider = currentRiders[riderIndex];
       const now = new Date().toISOString();
       
-      // ✅ NEW: Handle payment status with expiration tracking
+      // ✅ FIXED: Handle payment status with proper undefined handling
       if (paymentStatus === 'paid') {
         // Calculate expiration time based on subscription type
         const paidAt = new Date();
@@ -241,13 +241,17 @@ export class SubscriptionService {
         };
 
       } else {
-        // For unpaid/pending, clear payment tracking
-        currentRiders[riderIndex] = {
+        // ✅ FIXED: For unpaid/pending, properly handle undefined values
+        const updatedRider = {
           ...rider,
-          paymentStatus: paymentStatus,
-          paidAt: undefined,
-          expiresAt: undefined
+          paymentStatus: paymentStatus
         };
+        
+        // Remove paidAt and expiresAt fields completely instead of setting to undefined
+        delete updatedRider.paidAt;
+        delete updatedRider.expiresAt;
+        
+        currentRiders[riderIndex] = updatedRider;
       }
       
       // Update bus document

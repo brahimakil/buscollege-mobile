@@ -1,17 +1,17 @@
 export const AppColors = {
   light: {
-    // Primary colors
-    primary: '#6366F1', // Indigo
-    primaryLight: '#818CF8',
-    primaryDark: '#4F46E5',
+    // Primary colors - Professional Deep Blue
+    primary: '#1E40AF', // Deep professional blue
+    primaryLight: '#3B82F6',
+    primaryDark: '#1E3A8A',
     
-    // Secondary colors
-    secondary: '#EC4899', // Pink
-    secondaryLight: '#F472B6',
-    secondaryDark: '#DB2777',
+    // Secondary colors - Vibrant Orange
+    secondary: '#EA580C', // Deep energetic orange
+    secondaryLight: '#F97316',
+    secondaryDark: '#C2410C',
     
-    // Accent colors
-    accent: '#10B981', // Emerald
+    // Accent colors - Keep the great green
+    accent: '#10B981', // Emerald green
     accentLight: '#34D399',
     accentDark: '#059669',
     
@@ -38,7 +38,7 @@ export const AppColors = {
     success: '#10B981',
     warning: '#F59E0B',
     error: '#EF4444',
-    info: '#3B82F6',
+    info: '#1E40AF', // Use our new blue for info
     
     // Card colors
     card: '#FFFFFF',
@@ -47,8 +47,8 @@ export const AppColors = {
     // Sidebar colors
     sidebarBackground: '#1E293B',
     sidebarText: '#F1F5F9',
-    sidebarActive: '#6366F1',
-    sidebarActiveBackground: 'rgba(99, 102, 241, 0.1)',
+    sidebarActive: '#1E40AF', // Use new blue
+    sidebarActiveBackground: 'rgba(30, 64, 175, 0.1)',
     
     // Additional UI colors
     shadow: '#000000',
@@ -58,7 +58,7 @@ export const AppColors = {
     divider: '#E2E8F0',
     
     // Button colors
-    buttonPrimary: '#6366F1',
+    buttonPrimary: '#1E40AF', // New blue
     buttonSecondary: '#F1F5F9',
     buttonDanger: '#EF4444',
     buttonSuccess: '#10B981',
@@ -66,21 +66,21 @@ export const AppColors = {
     // Input colors
     inputBackground: '#FFFFFF',
     inputBorder: '#E2E8F0',
-    inputFocus: '#6366F1',
+    inputFocus: '#1E40AF', // New blue
     inputError: '#EF4444',
   },
   dark: {
-    // Primary colors - More vibrant on dark background
-    primary: '#8B5CF6', // More vibrant purple
-    primaryLight: '#A78BFA',
-    primaryDark: '#7C3AED',
+    // Primary colors - Brighter Blue for dark theme
+    primary: '#3B82F6', // Bright beautiful blue
+    primaryLight: '#60A5FA',
+    primaryDark: '#2563EB',
     
-    // Secondary colors - Enhanced pink
-    secondary: '#EC4899',
-    secondaryLight: '#F472B6',
-    secondaryDark: '#DB2777',
+    // Secondary colors - Vibrant Orange for dark theme
+    secondary: '#F97316', // Bright energetic orange
+    secondaryLight: '#FB923C',
+    secondaryDark: '#EA580C',
     
-    // Accent colors - Brighter green
+    // Accent colors - Enhanced green
     accent: '#10B981',
     accentLight: '#34D399',
     accentDark: '#059669',
@@ -108,7 +108,7 @@ export const AppColors = {
     success: '#22C55E', // Brighter green
     warning: '#F59E0B', // Bright orange
     error: '#EF4444', // Bright red
-    info: '#3B82F6', // Bright blue
+    info: '#3B82F6', // Our new bright blue
     
     // Card colors - Deep dark
     card: '#0A0A0B',
@@ -117,8 +117,8 @@ export const AppColors = {
     // Sidebar colors - Ultra dark
     sidebarBackground: '#000000', // Pure black sidebar
     sidebarText: '#E5E7EB',
-    sidebarActive: '#8B5CF6',
-    sidebarActiveBackground: 'rgba(139, 92, 246, 0.2)', // More visible active state
+    sidebarActive: '#3B82F6', // New bright blue
+    sidebarActiveBackground: 'rgba(59, 130, 246, 0.2)', // More visible active state
     
     // Additional UI colors - Enhanced for dark
     shadow: '#000000',
@@ -128,7 +128,7 @@ export const AppColors = {
     divider: '#1F1F23', // Very dark divider
     
     // Button colors - More vibrant
-    buttonPrimary: '#8B5CF6',
+    buttonPrimary: '#3B82F6', // New bright blue
     buttonSecondary: '#1F1F23', // Very dark secondary button
     buttonDanger: '#EF4444',
     buttonSuccess: '#22C55E',
@@ -136,7 +136,7 @@ export const AppColors = {
     // Input colors - Ultra dark
     inputBackground: '#0A0A0B', // Almost black input
     inputBorder: '#1F1F23', // Dark border
-    inputFocus: '#8B5CF6', // Vibrant focus
+    inputFocus: '#3B82F6', // New bright blue focus
     inputError: '#EF4444',
   },
 };

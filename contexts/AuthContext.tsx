@@ -3,6 +3,7 @@ import {
   User,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   signInWithEmailAndPassword,
   signOut
 } from 'firebase/auth';
@@ -20,6 +21,8 @@ interface UserData {
   busAssignments?: any[];
   licenseNumber?: string;
   emergencyContact?: string;
+  emailVerified?: boolean; // Add email verification status
+  accountStatus?: 'pending_verification' | 'active' | 'suspended'; // Add account status
 }
 
 interface AuthContextType {
@@ -30,6 +33,7 @@ interface AuthContextType {
   register: (userData: Omit<UserData, 'uid'>, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUserData: (data: Partial<UserData>) => Promise<void>;
+  resendVerificationEmail: (email: string, password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -86,13 +90,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Attempting login for:', email);
       setLoading(true);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      console.log('Login successful');
       
-      // Wait for user data to be loaded
+      // Get user data first to check their role
       const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+      
       if (userDoc.exists()) {
         const userData = userDoc.data() as UserData;
-        console.log('User data loaded, redirecting based on role:', userData.role);
+        console.log('User data loaded, role:', userData.role);
+        
+        // FIXED: Only check email verification for riders, not drivers
+        if (userData.role === 'rider' && !userCredential.user.emailVerified) {
+          console.log('Rider email not verified, signing out user');
+          await signOut(auth);
+          throw new Error('Please verify your email address before logging in. Check your email inbox (including spam folder) for the verification link.');
+        }
+        
+        // Allow drivers to login without email verification
+        if (userData.role === 'driver') {
+          console.log('Driver login successful - no email verification required');
+        } else if (userData.role === 'rider') {
+          console.log('Rider login successful - email verified');
+        }
+        
+        // Update user document to reflect email verification status (only if actually verified)
+        if (userCredential.user.emailVerified && !userData.emailVerified) {
+          await updateDoc(doc(db, 'users', userCredential.user.uid), {
+            emailVerified: true,
+            accountStatus: 'active',
+            updatedAt: new Date().toISOString(),
+          });
+        }
         
         // Direct redirect based on role
         if (userData.role === 'driver') {
@@ -104,7 +131,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } else {
         console.log('No user document found, redirecting to index');
-        router.replace('/');
+        await signOut(auth);
+        throw new Error('User profile not found. Please contact support.');
       }
     } catch (error: any) {
       console.error('Login error:', error);
@@ -130,6 +158,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         case 'auth/weak-password':
           throw new Error('Password is too weak. Please choose a stronger password.');
         default:
+          // Check if it's our custom email verification error
+          if (error.message.includes('verify your email')) {
+            throw error; // Re-throw our custom error
+          }
           throw new Error('Login failed. Please try again or contact support if the problem persists.');
       }
     } finally {
@@ -218,6 +250,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const resendVerificationEmail = async (email: string, password: string) => {
+    try {
+      console.log('Resending verification email for:', email);
+      setLoading(true);
+      
+      // Sign in to get the user object
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      // Check if already verified
+      if (user.emailVerified) {
+        throw new Error('Your email is already verified. You can now log in normally.');
+      }
+      
+      // Send verification email
+      await sendEmailVerification(user);
+      
+      // Sign out the user
+      await signOut(auth);
+      
+      console.log('Verification email sent successfully');
+      
+    } catch (error: any) {
+      console.error('Error resending verification email:', error);
+      
+      // Handle specific error cases
+      switch (error.code) {
+        case 'auth/invalid-credential':
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+          throw new Error('Invalid email or password. Please check your credentials and try again.');
+        case 'auth/too-many-requests':
+          throw new Error('Too many attempts. Please try again later.');
+        case 'auth/network-request-failed':
+          throw new Error('Network error. Please check your internet connection and try again.');
+        default:
+          // Check if it's our custom "already verified" error
+          if (error.message.includes('already verified')) {
+            throw error; // Re-throw our custom error
+          }
+          throw new Error('Failed to resend verification email. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const value = {
     user,
     userData,
@@ -226,6 +305,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     register,
     logout,
     updateUserData,
+    resendVerificationEmail,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

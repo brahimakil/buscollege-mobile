@@ -56,12 +56,24 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
   const availableSeats = bus.maxCapacity - (bus.currentRiders?.length || 0);
 
-  const toggleLocationSelection = (locationName: string) => {
+  // Create unique identifier for each location to handle same-named routes
+  const getLocationId = (location: any) => {
+    return `${location.name}-${location.order}-${location.arrivalTimeFrom}`;
+  };
+
+  // Get location from unique ID
+  const getLocationFromId = (locationId: string) => {
+    return bus.locations.find(loc => getLocationId(loc) === locationId);
+  };
+
+  // Fixed: Use unique identifier instead of just name
+  const toggleLocationSelection = (location: any) => {
+    const locationId = getLocationId(location);
     setSelectedLocations(prev => {
-      if (prev.includes(locationName)) {
-        return prev.filter(name => name !== locationName);
+      if (prev.includes(locationId)) {
+        return prev.filter(id => id !== locationId);
       } else {
-        return [...prev, locationName];
+        return [...prev, locationId];
       }
     });
   };
@@ -79,7 +91,13 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
     setLoading(true);
     try {
-      await onSubscribe(selectedType, selectedLocations);
+      // Convert unique IDs back to location names for the subscription
+      const locationNames = selectedLocations.map(locationId => {
+        const location = getLocationFromId(locationId);
+        return location ? location.name : '';
+      }).filter(name => name);
+      
+      await onSubscribe(selectedType, locationNames);
     } finally {
       setLoading(false);
     }
@@ -180,35 +198,40 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 )}
                 {bus.locations
                   .sort((a, b) => a.order - b.order)
-                  .map((location, index) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={[
-                        styles.locationItem,
-                        {
-                          backgroundColor: selectedLocations.includes(location.name)
-                            ? colors.primary + '20' 
-                            : colors.backgroundSecondary,
-                          borderColor: selectedLocations.includes(location.name)
-                            ? colors.primary 
-                            : colors.border,
-                        }
-                      ]}
-                      onPress={() => toggleLocationSelection(location.name)}
-                    >
-                      <View style={styles.locationInfo}>
-                        <Text style={[styles.locationName, { color: colors.text }]}>
-                          {location.name}
-                        </Text>
-                        <Text style={[styles.locationTime, { color: colors.textSecondary }]}>
-                          {location.arrivalTimeFrom} - {location.arrivalTimeTo}
-                        </Text>
-                      </View>
-                      {selectedLocations.includes(location.name) && (
-                        <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
+                  .map((location, index) => {
+                    const locationId = getLocationId(location);
+                    const isSelected = selectedLocations.includes(locationId);
+                    
+                    return (
+                      <TouchableOpacity
+                        key={locationId} // Use unique ID as key
+                        style={[
+                          styles.locationItem,
+                          {
+                            backgroundColor: isSelected
+                              ? colors.primary + '20' 
+                              : colors.backgroundSecondary,
+                            borderColor: isSelected
+                              ? colors.primary 
+                              : colors.border,
+                          }
+                        ]}
+                        onPress={() => toggleLocationSelection(location)}
+                      >
+                        <View style={styles.locationInfo}>
+                          <Text style={[styles.locationName, { color: colors.text }]}>
+                            {location.name}
+                          </Text>
+                          <Text style={[styles.locationTime, { color: colors.textSecondary }]}>
+                            {location.arrivalTimeFrom} - {location.arrivalTimeTo}
+                          </Text>
+                        </View>
+                        {isSelected && (
+                          <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
               </View>
             )}
 

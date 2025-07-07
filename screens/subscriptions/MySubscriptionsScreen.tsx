@@ -549,7 +549,6 @@ export const MySubscriptionsScreen: React.FC = () => {
                         {subscription.locationId}
                       </Text>
                       <Text style={[styles.locationAddress, { color: colors.textSecondary }]}>
-                        Location details not found
                       </Text>
                     </View>
                   );
