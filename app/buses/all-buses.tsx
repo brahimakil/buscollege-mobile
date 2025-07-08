@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
+import { FavoritesProvider } from '../../contexts/FavoritesContext';
 import { MainLayout } from '../../layouts/MainLayout';
 import { AllBusesScreen } from '../../screens/buses/AllBusesScreen';
 
@@ -33,12 +34,14 @@ export default function AllBusesRoute() {
   };
 
   return (
-    <MainLayout
-      title="All Buses"
-      currentRoute={currentRoute}
-      onNavigate={handleNavigate}
-    >
-      <AllBusesScreen />
-    </MainLayout>
+    <FavoritesProvider>
+      <MainLayout
+        title="All Buses"
+        currentRoute={currentRoute}
+        onNavigate={handleNavigate}
+      >
+        <AllBusesScreen />
+      </MainLayout>
+    </FavoritesProvider>
   );
 } 

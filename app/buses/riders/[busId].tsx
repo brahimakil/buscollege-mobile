@@ -19,7 +19,7 @@ export default function BusRidersRoute() {
         router.push('/buses/my-buses');
         break;
       case 'profile':
-        router.push('/profile');
+        router.push('/profile/driver');
         break;
       case 'settings':
         router.push('/settings');

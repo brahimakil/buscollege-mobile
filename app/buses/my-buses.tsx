@@ -15,6 +15,9 @@ export default function MyBusesRoute() {
       case 'dashboard':
         router.push('/dashboard/driver');
         break;
+      case 'profile':
+        router.push('/profile/driver');
+        break;
       case 'my-buses':
         // Already on this page
         break;

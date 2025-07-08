@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
+import { FavoritesProvider } from '../../contexts/FavoritesContext';
 import { MainLayout } from '../../layouts/MainLayout';
 import { FavoritesScreen } from '../../screens/buses/FavoritesScreen';
 
@@ -33,12 +34,14 @@ export default function FavoritesRoute() {
   };
 
   return (
-    <MainLayout
-      title="Favorites"
-      currentRoute={currentRoute}
-      onNavigate={handleNavigate}
-    >
-      <FavoritesScreen />
-    </MainLayout>
+    <FavoritesProvider>
+      <MainLayout
+        title="Favorites"
+        currentRoute={currentRoute}
+        onNavigate={handleNavigate}
+      >
+        <FavoritesScreen />
+      </MainLayout>
+    </FavoritesProvider>
   );
 } 

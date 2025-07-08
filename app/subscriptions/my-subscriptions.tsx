@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
+import { FavoritesProvider } from '../../contexts/FavoritesContext';
 import { MainLayout } from '../../layouts/MainLayout';
 import { MySubscriptionsScreen } from '../../screens/subscriptions/MySubscriptionsScreen';
 
@@ -33,12 +34,14 @@ export default function MySubscriptionsRoute() {
   };
 
   return (
-    <MainLayout
-      title="My Subscriptions"
-      currentRoute={currentRoute}
-      onNavigate={handleNavigate}
-    >
-      <MySubscriptionsScreen />
-    </MainLayout>
+    <FavoritesProvider>
+      <MainLayout
+        title="My Subscriptions"
+        currentRoute={currentRoute}
+        onNavigate={handleNavigate}
+      >
+        <MySubscriptionsScreen />
+      </MainLayout>
+    </FavoritesProvider>
   );
 } 
