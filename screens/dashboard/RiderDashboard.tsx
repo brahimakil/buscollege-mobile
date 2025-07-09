@@ -164,14 +164,12 @@ export const RiderDashboard: React.FC = () => {
     }
   }, [userData?.uid]);
 
-  const generateRecentActivity = useCallback(async (subscriptions: any[], buses: BusData[]) => {
+  // ✅ FIXED: Generate REAL activity based on actual subscription data
+  const generateRecentActivity = useCallback((subscriptions: any[], buses: BusData[]) => {
     const activities: RecentActivity[] = [];
+    const now = new Date();
 
-    // Filter to only active subscriptions for recent activity
-    const activeSubscriptions = subscriptions.filter(sub => sub.status === 'active');
-
-    // Generate activity from active subscriptions only
-    activeSubscriptions.forEach((sub, index) => {
+    subscriptions.forEach((sub) => {
       const bus = buses.find(b => b.id === sub.busId);
       const busName = bus?.busName || 'Unknown Bus';
 
@@ -183,43 +181,60 @@ export const RiderDashboard: React.FC = () => {
         return new Date();
       };
 
-      // Subscription activity
-      activities.push({
-        id: `sub-${sub.busId}-${index}`,
-        type: 'subscription',
-        description: `Subscribed to ${busName} (${sub.subscriptionType})`,
-        date: safeDate(sub.assignedAt),
-        amount: sub.subscriptionType === 'monthly' ? bus?.pricePerMonth : bus?.pricePerRide,
-        busName,
-        status: sub.paymentStatus === 'paid' ? 'completed' : 'pending'
-      });
-
-      // Payment activity (if paid)
-      if (sub.paymentStatus === 'paid') {
-        activities.push({
-          id: `payment-${sub.busId}-${index}`,
-          type: 'payment',
-          description: `Payment processed for ${busName}`,
-          date: safeDate(sub.updatedAt),
-          amount: sub.subscriptionType === 'monthly' ? bus?.pricePerMonth : bus?.pricePerRide,
-          busName,
-          status: 'completed'
-        });
+      // Subscription activity (based on actual assignedAt timestamp)
+      if (sub.assignedAt) {
+        const subscriptionDate = safeDate(sub.assignedAt);
+        const daysSinceSubscribed = (now.getTime() - subscriptionDate.getTime()) / (1000 * 60 * 60 * 24);
+        
+        // Show subscriptions from last 60 days
+        if (daysSinceSubscribed <= 60) {
+          activities.push({
+            id: `sub-${sub.busId}-${sub.subscriptionId}`,
+            type: 'subscription',
+            description: `Subscribed to ${busName} (${sub.subscriptionType})`,
+            date: subscriptionDate, // ✅ REAL timestamp
+            amount: sub.subscriptionType === 'monthly' ? bus?.pricePerMonth : bus?.pricePerRide,
+            busName,
+            status: sub.paymentStatus === 'paid' ? 'completed' : 'pending'
+          });
+        }
       }
 
-      // Simulated ride activities for paid subscriptions
-      if (sub.paymentStatus === 'paid') {
-        const rideDate = new Date();
-        rideDate.setDate(rideDate.getDate() - Math.floor(Math.random() * 7)); // Random ride in last week
+      // Payment activity (based on actual payment date)
+      if (sub.paymentStatus === 'paid' && sub.paidAt) {
+        const paymentDate = safeDate(sub.paidAt);
+        const daysSincePayment = (now.getTime() - paymentDate.getTime()) / (1000 * 60 * 60 * 24);
         
-        activities.push({
-          id: `ride-${sub.busId}-${index}`,
-          type: 'ride',
-          description: `Completed ride on ${busName}`,
-          date: rideDate,
-          busName,
-          status: 'completed'
-        });
+        // Show payments from last 60 days
+        if (daysSincePayment <= 60) {
+          activities.push({
+            id: `payment-${sub.busId}-${sub.subscriptionId}`,
+            type: 'payment',
+            description: `Payment processed for ${busName} (${sub.subscriptionType})`,
+            date: paymentDate, // ✅ REAL timestamp
+            amount: sub.subscriptionType === 'monthly' ? bus?.pricePerMonth : bus?.pricePerRide,
+            busName,
+            status: 'completed'
+          });
+        }
+      }
+
+      // Unsubscription activity (based on actual unsubscribedAt timestamp)
+      if (sub.status === 'inactive' && sub.unsubscribedAt) {
+        const unsubscribedDate = safeDate(sub.unsubscribedAt);
+        const daysSinceUnsubscribed = (now.getTime() - unsubscribedDate.getTime()) / (1000 * 60 * 60 * 24);
+        
+        // Show unsubscriptions from last 60 days
+        if (daysSinceUnsubscribed <= 60) {
+          activities.push({
+            id: `unsubscribe-${sub.busId}-${sub.subscriptionId}`,
+            type: 'cancellation',
+            description: `Unsubscribed from ${busName}`,
+            date: unsubscribedDate, // ✅ REAL timestamp
+            busName,
+            status: 'completed'
+          });
+        }
       }
     });
 
@@ -263,6 +278,7 @@ export const RiderDashboard: React.FC = () => {
     };
   }, []);
 
+  // ✅ FIXED: Use real-time data refresh
   const fetchDashboardData = useCallback(async () => {
     if (!userData?.uid) {
       setLoading(false);
@@ -271,27 +287,27 @@ export const RiderDashboard: React.FC = () => {
     }
 
     try {
-      console.log('📊 Fetching dashboard data...');
+      console.log('�� Fetching real-time rider dashboard data...');
       
       const { subscriptions, buses } = await fetchUserSubscriptions();
       setBuses(buses);
 
-      // Calculate statistics
+      // Calculate real-time statistics
       const calculatedStats = calculateStats(subscriptions);
       setStats(calculatedStats);
 
-      // Generate recent activity
-      const activities = await generateRecentActivity(subscriptions, buses);
+      // Generate real activity based on actual events
+      const activities = generateRecentActivity(subscriptions, buses);
       setRecentActivity(activities);
 
-      console.log('📊 Dashboard data loaded:', {
+      console.log('📊 Real-time rider dashboard data loaded:', {
         stats: calculatedStats,
         activities: activities.length,
         buses: buses.length
       });
 
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      console.error('Error fetching rider dashboard data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -532,11 +548,12 @@ export const RiderDashboard: React.FC = () => {
         {showMap && (
           <View style={styles.mapContainer}>
             <MapComponent 
+              routes={mapRoutes}
               height={300}
-              centerLat={33.4}
-              centerLng={35.4}
-              zoom={10}
-              showRealTimeData={true}
+              centerLat={33.27}
+              centerLng={35.20}
+              zoom={11}
+              showRealTimeData={false}
             />
           </View>
         )}

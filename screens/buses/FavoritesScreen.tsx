@@ -240,30 +240,8 @@ export const FavoritesScreen: React.FC = () => {
         </View>
 
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.subscribeButton}>
-            <LinearGradient
-              colors={[colors.primary, colors.primaryDark || colors.primary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.subscribeGradient}
-            >
-              <Text style={[styles.subscribeButtonText, { color: colors.textInverse }]}>
-                {buttonText}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          <TouchableOpacity style={[
-            styles.trackButton,
-            {
-              backgroundColor: colors.backgroundTertiary,
-              borderColor: colors.border,
-            }
-          ]}>
-            <Ionicons name="location" size={16} color={colors.primary} />
-            <Text style={[styles.trackButtonText, { color: colors.primary }]}>
-              Track
-            </Text>
-          </TouchableOpacity>
+          
+        
         </View>
       </View>
     );

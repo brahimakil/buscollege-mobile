@@ -735,20 +735,6 @@ export const BusRidersScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Emergency Contact */}
-        {rider.emergencyContact && (
-          <View style={styles.emergencyContact}>
-            <Text style={[styles.emergencyTitle, { color: colors.text }]}>
-              Emergency Contact
-            </Text>
-            <Text style={[styles.emergencyText, { color: colors.textSecondary }]}>
-              {rider.emergencyContact.name} ({rider.emergencyContact.relationship})
-            </Text>
-            <Text style={[styles.emergencyText, { color: colors.textSecondary }]}>
-              📞 {rider.emergencyContact.phone}
-            </Text>
-          </View>
-        )}
 
         {/* DYNAMIC Action Buttons - Different based on payment status */}
         <View style={styles.actionButtons}>

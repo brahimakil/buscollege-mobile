@@ -4,7 +4,6 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   RefreshControl,
   ScrollView,
@@ -139,76 +138,72 @@ export const DriverDashboard: React.FC = () => {
     }
   }, [userData?.uid]);
 
+  // ✅ FIXED: Generate REAL activity based on actual subscription data
   const generateRecentActivity = useCallback((buses: BusData[]) => {
     const activities: RecentActivity[] = [];
     const now = new Date();
 
-    buses.forEach((bus, busIndex) => {
-      // ✅ FIXED: Use currentRiders instead of subscribers
+    buses.forEach((bus) => {
       if (bus.currentRiders && Array.isArray(bus.currentRiders)) {
-        const activeRiders = bus.currentRiders.filter((rider: any) => 
-          rider.status === 'active'
-        );
+        bus.currentRiders.forEach((rider: any) => {
+          // Only process riders with valid data
+          if (rider && rider.id && rider.assignedAt) {
+            const assignedDate = new Date(rider.assignedAt);
+            const updatedDate = rider.updatedAt ? new Date(rider.updatedAt) : assignedDate;
+            
+            // New subscriber activity (based on actual assignedAt timestamp)
+            if (rider.status === 'active') {
+              const daysSinceAssigned = (now.getTime() - assignedDate.getTime()) / (1000 * 60 * 60 * 24);
+              
+              // Show new subscribers from last 30 days
+              if (daysSinceAssigned <= 30) {
+                activities.push({
+                  id: `subscriber-${rider.id}-${rider.subscriptionId}`,
+                  type: 'new_subscriber',
+                  description: `${rider.name} subscribed to ${bus.busName} (${rider.subscriptionType})`,
+                  date: assignedDate, // ✅ REAL timestamp
+                  busName: bus.busName
+                });
+              }
+            }
 
-        if (activeRiders.length > 0) {
-          const activityDate = new Date(now);
-          activityDate.setDate(activityDate.getDate() - Math.floor(Math.random() * 7));
-          
-          activities.push({
-            id: `pickup-${bus.id}-${busIndex}`,
-            type: 'rider_pickup',
-            description: `${activeRiders.length} rider${activeRiders.length !== 1 ? 's' : ''} picked up`,
-            date: activityDate,
-            busName: bus.busName,
-            riderCount: activeRiders.length
-          });
-        }
+            // Payment activity (based on actual payment status changes)
+            if (rider.paymentStatus === 'paid' && rider.paidAt) {
+              const paidDate = new Date(rider.paidAt);
+              const daysSincePaid = (now.getTime() - paidDate.getTime()) / (1000 * 60 * 60 * 24);
+              
+              // Show payments from last 30 days
+              if (daysSincePaid <= 30) {
+                const amount = rider.subscriptionType === 'monthly' ? bus.pricePerMonth : bus.pricePerRide;
+                activities.push({
+                  id: `payment-${rider.id}-${rider.subscriptionId}`,
+                  type: 'payment_received',
+                  description: `Payment received from ${rider.name} (${rider.subscriptionType})`,
+                  date: paidDate, // ✅ REAL timestamp
+                  busName: bus.busName,
+                  amount: amount
+                });
+              }
+            }
 
-        // ✅ FIXED: Check for new active subscriptions in currentRiders
-        const newSubscribers = bus.currentRiders.filter((rider: any) => {
-          if (rider.status === 'active') {
-            const assignedDate = new Date(rider.assignedAt || rider.startDate);
-            const daysDiff = Math.abs(now.getTime() - assignedDate.getTime()) / (1000 * 60 * 60 * 24);
-            return daysDiff <= 7; // Subscribed in last 7 days
+            // Unsubscription activity (based on actual unsubscribedAt timestamp)
+            if (rider.status === 'inactive' && rider.unsubscribedAt) {
+              const unsubscribedDate = new Date(rider.unsubscribedAt);
+              const daysSinceUnsubscribed = (now.getTime() - unsubscribedDate.getTime()) / (1000 * 60 * 60 * 24);
+              
+              // Show unsubscriptions from last 30 days
+              if (daysSinceUnsubscribed <= 30) {
+                activities.push({
+                  id: `unsubscribe-${rider.id}-${rider.subscriptionId}`,
+                  type: 'rider_pickup', // Using existing type, but with different description
+                  description: `${rider.name} unsubscribed from ${bus.busName}`,
+                  date: unsubscribedDate, // ✅ REAL timestamp
+                  busName: bus.busName
+                });
+              }
+            }
           }
-          return false;
         });
-
-        if (newSubscribers.length > 0) {
-          const activityDate = new Date(now);
-          activityDate.setDate(activityDate.getDate() - Math.floor(Math.random() * 7));
-          
-          activities.push({
-            id: `subscriber-${bus.id}-${busIndex}`,
-            type: 'new_subscriber',
-            description: `${newSubscribers.length} new subscriber${newSubscribers.length !== 1 ? 's' : ''}`,
-            date: activityDate,
-            busName: bus.busName
-          });
-        }
-
-        // ✅ FIXED: Check for paid riders in currentRiders
-        const paidRiders = bus.currentRiders.filter((rider: any) => {
-          if (rider.status === 'active') {
-            return rider.paymentStatus === 'paid';
-          }
-          return false;
-        });
-
-        if (paidRiders.length > 0) {
-          const paymentDate = new Date(now);
-          paymentDate.setDate(paymentDate.getDate() - Math.floor(Math.random() * 30));
-          
-          const estimatedEarnings = paidRiders.length * bus.pricePerMonth;
-          activities.push({
-            id: `payment-${bus.id}-${busIndex}`,
-            type: 'payment_received',
-            description: `Monthly payments received from ${paidRiders.length} rider${paidRiders.length !== 1 ? 's' : ''}`,
-            date: paymentDate,
-            busName: bus.busName,
-            amount: estimatedEarnings
-          });
-        }
       }
     });
 
@@ -286,6 +281,7 @@ export const DriverDashboard: React.FC = () => {
     };
   }, []);
 
+  // ✅ FIXED: Use real-time data refresh
   const fetchDashboardData = useCallback(async () => {
     if (!userData?.uid) {
       setLoading(false);
@@ -294,21 +290,21 @@ export const DriverDashboard: React.FC = () => {
     }
 
     try {
-      console.log('📊 Fetching driver dashboard data...');
+      console.log('📊 Fetching real-time driver dashboard data...');
       setError(null);
       
       const driverBuses = await fetchDriverBuses();
       setBuses(driverBuses);
 
-      // Calculate statistics
+      // Calculate real-time statistics
       const calculatedStats = calculateStats(driverBuses);
       setStats(calculatedStats);
 
-      // Generate recent activity
+      // Generate real activity based on actual events
       const activities = generateRecentActivity(driverBuses);
       setRecentActivity(activities);
 
-      console.log('📊 Driver dashboard data loaded:', {
+      console.log('📊 Real-time driver dashboard data loaded:', {
         buses: driverBuses.length,
         stats: calculatedStats,
         activities: activities.length
@@ -317,27 +313,22 @@ export const DriverDashboard: React.FC = () => {
     } catch (error: any) {
       console.error('Error fetching driver dashboard data:', error);
       setError(error.message || 'Failed to load dashboard data');
-      
-      // Show user-friendly error alert
-      Alert.alert(
-        'Error Loading Dashboard',
-        error.message || 'Failed to load dashboard data. Please try again.',
-        [
-          {
-            text: 'Retry',
-            onPress: () => fetchDashboardData()
-          },
-          {
-            text: 'OK',
-            style: 'cancel'
-          }
-        ]
-      );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [userData?.uid, fetchDriverBuses, calculateStats, generateRecentActivity]);
+
+  // ✅ ADDED: Auto-refresh every 30 seconds for real-time updates
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!refreshing && !loading) {
+        fetchDashboardData();
+      }
+    }, 30000); // Refresh every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [fetchDashboardData, refreshing, loading]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -574,10 +565,10 @@ export const DriverDashboard: React.FC = () => {
             <MapComponent 
               routes={busRoutes}
               height={300}
-              centerLat={33.4}
-              centerLng={35.4}
-              zoom={10}
-              showRealTimeData={true}
+              centerLat={33.27}
+              centerLng={35.20}
+              zoom={11}
+              showRealTimeData={false}
             />
           </View>
         )}
