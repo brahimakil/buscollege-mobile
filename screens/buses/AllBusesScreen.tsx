@@ -9,6 +9,7 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -163,6 +164,95 @@ const WorkingDayChip: React.FC<{ day: string; isActive: boolean }> = ({ day, isA
   );
 };
 
+// ✅ FIXED: Move SearchBar outside and memoize it properly
+const SearchBar = React.memo(({ 
+  searchQuery, 
+  onSearchChange, 
+  onClear, 
+  colors, 
+  isDark 
+}: {
+  searchQuery: string;
+  onSearchChange: (text: string) => void;
+  onClear: () => void;
+  colors: any;
+  isDark: boolean;
+}) => (
+  <View style={[styles.searchContainer, { 
+    backgroundColor: colors.backgroundSecondary,
+    borderBottomColor: colors.border 
+  }]}>
+    <View style={[styles.searchInputContainer, { 
+      backgroundColor: colors.background,
+      borderColor: colors.border,
+      ...getThemeShadow(isDark, 'sm')
+    }]}>
+      <Ionicons 
+        name="search" 
+        size={20} 
+        color={colors.textSecondary} 
+        style={styles.searchIcon}
+      />
+      <TextInput
+        style={[styles.searchInput, { 
+          color: colors.text,
+          flex: 1
+        }]}
+        placeholder="Search buses, routes, drivers..."
+        placeholderTextColor={colors.textTertiary}
+        value={searchQuery}
+        onChangeText={onSearchChange}
+        returnKeyType="search"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus={false}
+        blurOnSubmit={false}
+      />
+      {searchQuery.length > 0 && (
+        <TouchableOpacity
+          onPress={onClear}
+          style={styles.clearButton}
+        >
+          <Ionicons 
+            name="close-circle" 
+            size={20} 
+            color={colors.textSecondary} 
+          />
+        </TouchableOpacity>
+      )}
+    </View>
+  </View>
+));
+
+// ✅ FIXED: Move SearchResults outside and memoize it
+const SearchResults = React.memo(({ 
+  searchQuery, 
+  resultsCount, 
+  colors 
+}: {
+  searchQuery: string;
+  resultsCount: number;
+  colors: any;
+}) => {
+  if (!searchQuery.trim()) return null;
+  
+  return (
+    <View style={[styles.searchResults, { backgroundColor: colors.backgroundSecondary }]}>
+      <Text style={[styles.searchResultsText, { color: colors.textSecondary }]}>
+        {resultsCount === 0 
+          ? `No buses found for "${searchQuery}"`
+          : `Found ${resultsCount} bus${resultsCount !== 1 ? 'es' : ''} for "${searchQuery}"`
+        }
+      </Text>
+      {resultsCount === 0 && (
+        <Text style={[styles.searchSuggestion, { color: colors.textTertiary }]}>
+          Try searching by bus name, driver name, or route locations
+        </Text>
+      )}
+    </View>
+  );
+});
+
 export const AllBusesScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const { addToFavorites, removeFromFavorites, isFavorite } = useFavorites();
@@ -176,206 +266,282 @@ export const AllBusesScreen: React.FC = () => {
     bus: Bus | null;
   }>({ visible: false, bus: null });
   
+  // ✅ FIXED: Search functionality state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  
   // ✅ UPDATED: Enhanced subscription states
   const [subscriptionStates, setSubscriptionStates] = useState<Map<string, SubscriptionState>>(new Map());
-  
-  // ✅ FIXED: Enhanced function to handle different payment statuses correctly
-  const getSubscriptionStatus = useCallback(async (busId: string): Promise<SubscriptionState> => {
-    if (!userData?.uid) return { 
+
+  // ✅ FIXED: Memoize search callbacks to prevent re-renders
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
+
+  const toggleSearch = useCallback(() => {
+    setShowSearch(prev => {
+      if (prev) {
+        setSearchQuery(''); // Clear search when hiding
+      }
+      return !prev;
+    });
+  }, []);
+
+  // ✅ FIXED: Filter buses based on search query (stable memoization)
+  const filteredBuses = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return buses;
+    }
+
+    const query = searchQuery.toLowerCase().trim();
+    return buses.filter(bus => {
+      // Search in bus name
+      if (bus.busName?.toLowerCase().includes(query)) return true;
+      if (bus.busLabel?.toLowerCase().includes(query)) return true;
+      
+      // Search in driver name
+      if (bus.driverName?.toLowerCase().includes(query)) return true;
+      
+      // Search in route locations
+      if (bus.locations?.some(location => 
+        location.name?.toLowerCase().includes(query) ||
+        location.address?.city?.toLowerCase().includes(query) ||
+        location.address?.governorate?.toLowerCase().includes(query)
+      )) return true;
+      
+      // Search in operating hours
+      if (bus.operatingTimeFrom?.includes(query) || bus.operatingTimeTo?.includes(query)) return true;
+      
+      return false;
+    });
+  }, [buses, searchQuery]);
+
+  // ✅ FIXED: Stable keyExtractor
+  const keyExtractor = useCallback((item: Bus) => item.id, []);
+
+  // ✅ FIXED: Memoize renderBusCard to prevent unnecessary re-renders
+  const renderBusCard = useCallback((item: Bus) => {
+    const subscriptionState = subscriptionStates.get(item.id) || { 
       isSubscribed: false, 
-      canResubscribe: false, 
+      canResubscribe: true, 
       subscriptionType: 'none' 
     };
     
-    try {
-      console.log(`🔍 Checking subscription status for bus ${busId} and user ${userData.uid}`);
-      
-      // ✅ NEW: Get bus data to check currentRiders (single source of truth)
-      const busRef = doc(db, 'buses', busId);
-      const busDoc = await getDoc(busRef);
-      
-      if (!busDoc.exists()) {
-        console.log(`❌ Bus ${busId} not found`);
-        return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
+    const handleFavoriteToggleLocal = () => {
+      handleFavoriteToggle(item);
+    };
+
+    const handleSubscribe = () => {
+      if (userData?.role !== 'rider') {
+        Alert.alert('Access Denied', 'Only riders can subscribe to bus routes.');
+        return;
       }
-      
-      const busData = busDoc.data();
-      const currentRiders = busData.currentRiders || [];
-      
-      // Find this user in currentRiders array
-      const currentRider = currentRiders.find((rider: any) => {
-        if (typeof rider === 'string') {
-          return rider === userData.uid;
-        } else if (typeof rider === 'object' && rider.id) {
-          return rider.id === userData.uid;
-        }
-        return false;
-      });
-      
-      if (!currentRider) {
-        console.log(`❌ User not found in currentRiders for bus ${busId}`);
-        return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
-      }
-      
-      // ✅ FIXED LOGIC: Handle different payment statuses
-      const paymentStatus = currentRider.paymentStatus;
-      const riderStatus = currentRider.status;
-      
-      console.log(`🎯 Found rider in bus ${busId}: status=${riderStatus}, paymentStatus=${paymentStatus}`);
-      
-      if (riderStatus === 'active') {
-        if (paymentStatus === 'unpaid') {
-          // ✅ UNPAID: Show resubscribe button
-          return {
-            isSubscribed: false,
-            canResubscribe: true,
-            subscriptionType: 'ended',
-            paymentStatus: 'unpaid',
-            hasUnpaidSubscription: true
-          };
-        } else if (paymentStatus === 'paid' || paymentStatus === 'pending') {
-          // ✅ PAID/PENDING: Show "Already subscribed"
-          return {
-            isSubscribed: true,
-            canResubscribe: false,
-            subscriptionType: 'active',
-            paymentStatus: paymentStatus
-          };
-        }
-      }
-      
-      // Default: Not subscribed
-      return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
-      
-    } catch (error) {
-      console.error('Error checking subscription:', error);
-      return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
-    }
-  }, [userData?.uid]);
 
-  // Load subscription states for all buses
-  const loadSubscriptionStates = useCallback(async () => {
-    if (!userData?.uid || buses.length === 0) return;
-    
-    const newStates = new Map();
-    
-    // Check subscription status for each bus
-    await Promise.all(
-      buses.map(async (bus) => {
-        const status = await getSubscriptionStatus(bus.id);
-        newStates.set(bus.id, status);
-      })
-    );
-    
-    setSubscriptionStates(newStates);
-  }, [buses, getSubscriptionStatus, userData?.uid]);
-
-  // Load subscription states when buses change
-  useEffect(() => {
-    loadSubscriptionStates();
-  }, [loadSubscriptionStates]);
-
-  // Enhanced fetchBuses with better data fetching
-  const fetchBuses = useCallback(async () => {
-    try {
-      console.log('🔄 Fetching buses data...');
-      
-      const busesSnapshot = await getDocs(collection(db, 'buses'));
-      const busesData = busesSnapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log(`Bus ${doc.id} has ${data.currentRiders?.length || 0} riders`);
-        return {
-          id: doc.id,
-          ...data
-        };
-      }) as Bus[];
-      
-      setBuses(busesData);
-      console.log(`✅ Loaded ${busesData.length} buses`);
-    } catch (error) {
-      console.error('Error fetching buses:', error);
-      Alert.alert('Error', 'Failed to load buses. Please try again.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchBuses();
-  }, [fetchBuses]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchBuses().finally(() => {
-      setRefreshing(false);
-    });
-  }, [fetchBuses]);
-
-  const handleFavoriteToggle = useCallback(async (bus: Bus) => {
-    try {
-      console.log(`⭐ Toggling favorite for bus ${bus.id}`);
-      
-      const favoritesBus = {
-        id: bus.id,
-        busName: bus.busName || 'Unknown Bus',
-        driverName: bus.driverName || 'Unknown Driver',
-        route: getRouteText(bus.locations),
-        locations: (bus.locations || []).map(loc => ({
-          name: loc.name || 'Unknown Location',
-          latitude: loc.latitude || 0,
-          longitude: loc.longitude || 0,
-          order: loc.order || 0
-        })),
-        capacity: bus.maxCapacity || 0,
-        currentRiders: bus.currentRiders?.length || 0,
-        subscriptionTypes: {
-          monthly: bus.pricePerMonth || 0,
-          perRide: bus.pricePerRide || 0
-        },
-        schedule: {
-          departureTime: bus.operatingTimeFrom || '--:--',
-          arrivalTime: bus.operatingTimeTo || '--:--',
-          days: getWorkingDaysArray(bus.workingDays || {})
-        }
-      };
-
-      if (isFavorite(bus.id)) {
-        await removeFromFavorites(bus.id);
-        console.log(`⭐ Removed bus ${bus.id} from favorites`);
+      // ✅ FIXED: Handle different subscription states
+      if (subscriptionState.isSubscribed) {
+        // ✅ PAID/PENDING: Show unsubscribe option
+        Alert.alert(
+          'Already Subscribed',
+          `You are currently subscribed to ${item.busName}. Would you like to unsubscribe?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Unsubscribe',
+              style: 'destructive',
+              onPress: () => handleUnsubscribe(item)
+            }
+          ]
+        );
+      } else if (subscriptionState.hasUnpaidSubscription) {
+        // ✅ UNPAID: Show resubscribe with warning
+        handleResubscribeUnpaid(item);
+      } else if (subscriptionState.canResubscribe) {
+        // ✅ NEW SUBSCRIPTION: Normal subscription flow
+        setSubscriptionModal({ visible: true, bus: item });
       } else {
-        await addToFavorites(favoritesBus);
-        console.log(`⭐ Added bus ${bus.id} to favorites`);
+        Alert.alert('Cannot Subscribe', 'Unable to subscribe to this bus route at the moment.');
       }
+    };
 
-      // ✅ FORCE REFRESH: Refresh both buses and subscription states
-      console.log('🔄 Favorite toggled, force refreshing all data...');
-      
-      // First refresh buses to get latest data
-      await fetchBuses();
-      
-      // Wait for database consistency
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Then refresh subscription states with fresh data
-      await loadSubscriptionStates();
+    // ✅ UPDATED: Enhanced button configuration with payment status
+    const getButtonConfig = () => {
+      if (subscriptionState.isSubscribed) {
+        if (subscriptionState.paymentStatus === 'paid') {
+          return {
+            text: 'Subscribed (Paid)',
+            icon: 'checkmark-circle' as const,
+            backgroundColor: colors.success,
+            borderColor: colors.success,
+          };
+        } else if (subscriptionState.paymentStatus === 'pending') {
+          return {
+            text: 'Subscribed (Pending)',
+            icon: 'time' as const,
+            backgroundColor: colors.warning,
+            borderColor: colors.warning,
+          };
+        } else {
+          return {
+            text: 'Subscribed',
+            icon: 'checkmark-circle' as const,
+            backgroundColor: colors.success,
+            borderColor: colors.success,
+          };
+        }
+      } else if (subscriptionState.hasUnpaidSubscription) {
+        return {
+          text: 'Resubscribe (Unpaid)',
+          icon: 'refresh-circle' as const,
+          backgroundColor: colors.error,
+          borderColor: colors.error,
+        };
+      } else if (subscriptionState.subscriptionType === 'ended') {
+        return {
+          text: 'Resubscribe',
+          icon: 'refresh-circle' as const,
+          backgroundColor: colors.warning,
+          borderColor: colors.warning,
+        };
+      } else {
+        return {
+          text: 'Subscribe',
+          icon: 'add-circle' as const,
+          backgroundColor: colors.primary,
+          borderColor: colors.primary,
+        };
+      }
+    };
 
-      // 🔄 ADDED: Update subscription state for this specific bus
-      const newStatus = await getSubscriptionStatus(bus.id);
-      setSubscriptionStates(prev => {
-        const newMap = new Map(prev);
-        newMap.set(bus.id, newStatus);
-        return newMap;
-      });
-      
-      console.log('✅ Data refresh completed after favorite toggle');
-      
-    } catch (error) {
-      console.error('Error toggling favorite:', error);
-      Alert.alert('Error', 'Failed to update favorites. Please try again.');
-    }
-  }, [addToFavorites, removeFromFavorites, isFavorite, loadSubscriptionStates, fetchBuses, getSubscriptionStatus]);
+    const buttonConfig = getButtonConfig();
 
+    return (
+      <View style={[
+        styles.busCard,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          ...getThemeShadow(isDark, 'md'),
+        }
+      ]}>
+        <BusCardHeader
+          bus={item}
+          isStarred={isFavorite(item.id)}
+          onFavoriteToggle={handleFavoriteToggleLocal}
+        />
+
+        {/* Capacity and Pricing */}
+        <View style={styles.cardContent}>
+          <View style={styles.capacitySection}>
+            <View style={styles.capacityInfo}>
+              <Ionicons name="people" size={20} color={colors.primary} />
+              <Text style={[styles.capacityText, { color: colors.text }]}>
+                {item.currentRiders?.length || 0}/{item.maxCapacity || 0} riders
+              </Text>
+            </View>
+            <View style={styles.pricingInfo}>
+              <Text style={[styles.priceText, { color: colors.success }]}>
+                ${item.pricePerMonth || 0}/month
+              </Text>
+              <Text style={[styles.priceSubtext, { color: colors.textSecondary }]}>
+                ${item.pricePerRide || 0}/ride
+              </Text>
+            </View>
+          </View>
+
+          {/* Working Days */}
+          <View style={styles.workingDaysSection}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Working Days</Text>
+            <View style={styles.workingDays}>
+              {getWorkingDaysArray(item.workingDays).map((day) => (
+                <WorkingDayChip
+                  key={day}
+                  day={day}
+                  isActive={day.isActive}
+                />
+              ))}
+            </View>
+          </View>
+
+          {/* Operating Hours */}
+          <View style={styles.operatingHours}>
+            <Ionicons name="time" size={16} color={colors.textSecondary} />
+            <Text style={[styles.operatingText, { color: colors.textSecondary }]}>
+              {item.operatingTimeFrom || '--:--'} - {item.operatingTimeTo || '--:--'}
+            </Text>
+          </View>
+
+          {/* Route */}
+          <View style={styles.routeSection}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Route</Text>
+            <Text style={[styles.routeText, { color: colors.textSecondary }]}>
+              {getRouteText(item.locations)}
+            </Text>
+            
+            <View style={styles.stopsContainer}>
+              {item.locations?.slice(0, 3).map((location, index) => (
+                <LocationStop
+                  key={`${location.placeId}-${index}`}
+                  location={location}
+                  index={index}
+                  isFirst={index === 0}
+                  isLast={index === item.locations.length - 1}
+                  showLine={index < item.locations.length - 1}
+                />
+              ))}
+              {item.locations?.length > 3 && (
+                <Text style={[styles.moreStops, { color: colors.textTertiary }]}>
+                  +{item.locations.length - 3} more stops
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* Updated Subscription Button */}
+          <TouchableOpacity
+            style={[
+              styles.subscribeButton,
+              {
+                backgroundColor: buttonConfig.backgroundColor,
+                borderColor: buttonConfig.borderColor,
+              }
+            ]}
+            onPress={handleSubscribe}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={buttonConfig.icon}
+              size={20}
+              color={colors.textInverse}
+            />
+            <Text style={[styles.subscribeButtonText, { color: colors.textInverse }]}>
+              {buttonConfig.text}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }, [
+    subscriptionStates,
+    isFavorite,
+    handleFavoriteToggle,
+    userData,
+    colors,
+    isDark,
+    handleUnsubscribe,
+    handleResubscribeUnpaid // ✅ NEW dependency
+  ]);
+
+  // Memoized header stats
+  const headerStats = useMemo(() => ({
+    totalRoutes: buses.length,
+    totalRiders: buses.reduce((sum, bus) => sum + (bus.currentRiders?.length || 0), 0)
+  }), [buses]);
+
+  // ✅ UPDATED: Filter buses based on search query
   const getRouteText = useCallback((locations: BusLocation[]) => {
     if (!locations || locations.length === 0) return 'No route defined';
     const sortedLocations = [...locations].sort((a, b) => a.order - b.order);
@@ -589,231 +755,202 @@ export const AllBusesScreen: React.FC = () => {
     );
   }, [userData?.uid, fetchBuses, getSubscriptionStatus]);
 
-  // ✅ UPDATED: Enhanced renderBusCard with new payment status logic
-  const renderBusCard = useCallback((bus: Bus) => {
-    const subscriptionState = subscriptionStates.get(bus.id) || { 
+  // Enhanced fetchBuses with better data fetching
+  const fetchBuses = useCallback(async () => {
+    try {
+      console.log('🔄 Fetching buses data...');
+      
+      const busesSnapshot = await getDocs(collection(db, 'buses'));
+      const busesData = busesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log(`Bus ${doc.id} has ${data.currentRiders?.length || 0} riders`);
+        return {
+          id: doc.id,
+          ...data
+        };
+      }) as Bus[];
+      
+      setBuses(busesData);
+      console.log(`✅ Loaded ${busesData.length} buses`);
+    } catch (error) {
+      console.error('Error fetching buses:', error);
+      Alert.alert('Error', 'Failed to load buses. Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchBuses();
+  }, [fetchBuses]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchBuses().finally(() => {
+      setRefreshing(false);
+    });
+  }, [fetchBuses]);
+
+  const handleFavoriteToggle = useCallback(async (bus: Bus) => {
+    try {
+      console.log(`⭐ Toggling favorite for bus ${bus.id}`);
+      
+      const favoritesBus = {
+        id: bus.id,
+        busName: bus.busName || 'Unknown Bus',
+        driverName: bus.driverName || 'Unknown Driver',
+        route: getRouteText(bus.locations),
+        locations: (bus.locations || []).map(loc => ({
+          name: loc.name || 'Unknown Location',
+          latitude: loc.latitude || 0,
+          longitude: loc.longitude || 0,
+          order: loc.order || 0
+        })),
+        capacity: bus.maxCapacity || 0,
+        currentRiders: bus.currentRiders?.length || 0,
+        subscriptionTypes: {
+          monthly: bus.pricePerMonth || 0,
+          perRide: bus.pricePerRide || 0
+        },
+        schedule: {
+          departureTime: bus.operatingTimeFrom || '--:--',
+          arrivalTime: bus.operatingTimeTo || '--:--',
+          days: getWorkingDaysArray(bus.workingDays || {})
+        }
+      };
+
+      if (isFavorite(bus.id)) {
+        await removeFromFavorites(bus.id);
+        console.log(`⭐ Removed bus ${bus.id} from favorites`);
+      } else {
+        await addToFavorites(favoritesBus);
+        console.log(`⭐ Added bus ${bus.id} to favorites`);
+      }
+
+      // ✅ FORCE REFRESH: Refresh both buses and subscription states
+      console.log('🔄 Favorite toggled, force refreshing all data...');
+      
+      // First refresh buses to get latest data
+      await fetchBuses();
+      
+      // Wait for database consistency
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Then refresh subscription states with fresh data
+      await loadSubscriptionStates();
+
+      // 🔄 ADDED: Update subscription state for this specific bus
+      const newStatus = await getSubscriptionStatus(bus.id);
+      setSubscriptionStates(prev => {
+        const newMap = new Map(prev);
+        newMap.set(bus.id, newStatus);
+        return newMap;
+      });
+      
+      console.log('✅ Data refresh completed after favorite toggle');
+      
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      Alert.alert('Error', 'Failed to update favorites. Please try again.');
+    }
+  }, [addToFavorites, removeFromFavorites, isFavorite, loadSubscriptionStates, fetchBuses, getSubscriptionStatus]);
+
+  // Load subscription states for all buses
+  const loadSubscriptionStates = useCallback(async () => {
+    if (!userData?.uid || buses.length === 0) return;
+    
+    const newStates = new Map();
+    
+    // Check subscription status for each bus
+    await Promise.all(
+      buses.map(async (bus) => {
+        const status = await getSubscriptionStatus(bus.id);
+        newStates.set(bus.id, status);
+      })
+    );
+    
+    setSubscriptionStates(newStates);
+  }, [buses, getSubscriptionStatus, userData?.uid]);
+
+  // Load subscription states when buses change
+  useEffect(() => {
+    loadSubscriptionStates();
+  }, [loadSubscriptionStates]);
+
+  // ✅ FIXED: Enhanced function to handle different payment statuses correctly
+  const getSubscriptionStatus = useCallback(async (busId: string): Promise<SubscriptionState> => {
+    if (!userData?.uid) return { 
       isSubscribed: false, 
-      canResubscribe: true, 
+      canResubscribe: false, 
       subscriptionType: 'none' 
     };
     
-    const handleFavoriteToggleLocal = () => {
-      handleFavoriteToggle(bus);
-    };
-
-    const handleSubscribe = () => {
-      if (userData?.role !== 'rider') {
-        Alert.alert('Access Denied', 'Only riders can subscribe to bus routes.');
-        return;
+    try {
+      console.log(`🔍 Checking subscription status for bus ${busId} and user ${userData.uid}`);
+      
+      // ✅ NEW: Get bus data to check currentRiders (single source of truth)
+      const busRef = doc(db, 'buses', busId);
+      const busDoc = await getDoc(busRef);
+      
+      if (!busDoc.exists()) {
+        console.log(`❌ Bus ${busId} not found`);
+        return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
       }
-
-      // ✅ FIXED: Handle different subscription states
-      if (subscriptionState.isSubscribed) {
-        // ✅ PAID/PENDING: Show unsubscribe option
-        Alert.alert(
-          'Already Subscribed',
-          `You are currently subscribed to ${bus.busName}. Would you like to unsubscribe?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Unsubscribe',
-              style: 'destructive',
-              onPress: () => handleUnsubscribe(bus)
-            }
-          ]
-        );
-      } else if (subscriptionState.hasUnpaidSubscription) {
-        // ✅ UNPAID: Show resubscribe with warning
-        handleResubscribeUnpaid(bus);
-      } else if (subscriptionState.canResubscribe) {
-        // ✅ NEW SUBSCRIPTION: Normal subscription flow
-        setSubscriptionModal({ visible: true, bus });
-      } else {
-        Alert.alert('Cannot Subscribe', 'Unable to subscribe to this bus route at the moment.');
+      
+      const busData = busDoc.data();
+      const currentRiders = busData.currentRiders || [];
+      
+      // Find this user in currentRiders array
+      const currentRider = currentRiders.find((rider: any) => {
+        if (typeof rider === 'string') {
+          return rider === userData.uid;
+        } else if (typeof rider === 'object' && rider.id) {
+          return rider.id === userData.uid;
+        }
+        return false;
+      });
+      
+      if (!currentRider) {
+        console.log(`❌ User not found in currentRiders for bus ${busId}`);
+        return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
       }
-    };
-
-    // ✅ UPDATED: Enhanced button configuration with payment status
-    const getButtonConfig = () => {
-      if (subscriptionState.isSubscribed) {
-        if (subscriptionState.paymentStatus === 'paid') {
+      
+      // ✅ FIXED LOGIC: Handle different payment statuses
+      const paymentStatus = currentRider.paymentStatus;
+      const riderStatus = currentRider.status;
+      
+      console.log(`🎯 Found rider in bus ${busId}: status=${riderStatus}, paymentStatus=${paymentStatus}`);
+      
+      if (riderStatus === 'active') {
+        if (paymentStatus === 'unpaid') {
+          // ✅ UNPAID: Show resubscribe button
           return {
-            text: 'Subscribed (Paid)',
-            icon: 'checkmark-circle' as const,
-            backgroundColor: colors.success,
-            borderColor: colors.success,
+            isSubscribed: false,
+            canResubscribe: true,
+            subscriptionType: 'ended',
+            paymentStatus: 'unpaid',
+            hasUnpaidSubscription: true
           };
-        } else if (subscriptionState.paymentStatus === 'pending') {
+        } else if (paymentStatus === 'paid' || paymentStatus === 'pending') {
+          // ✅ PAID/PENDING: Show "Already subscribed"
           return {
-            text: 'Subscribed (Pending)',
-            icon: 'time' as const,
-            backgroundColor: colors.warning,
-            borderColor: colors.warning,
-          };
-        } else {
-          return {
-            text: 'Subscribed',
-            icon: 'checkmark-circle' as const,
-            backgroundColor: colors.success,
-            borderColor: colors.success,
+            isSubscribed: true,
+            canResubscribe: false,
+            subscriptionType: 'active',
+            paymentStatus: paymentStatus
           };
         }
-      } else if (subscriptionState.hasUnpaidSubscription) {
-        return {
-          text: 'Resubscribe (Unpaid)',
-          icon: 'refresh-circle' as const,
-          backgroundColor: colors.error,
-          borderColor: colors.error,
-        };
-      } else if (subscriptionState.subscriptionType === 'ended') {
-        return {
-          text: 'Resubscribe',
-          icon: 'refresh-circle' as const,
-          backgroundColor: colors.warning,
-          borderColor: colors.warning,
-        };
-      } else {
-        return {
-          text: 'Subscribe',
-          icon: 'add-circle' as const,
-          backgroundColor: colors.primary,
-          borderColor: colors.primary,
-        };
       }
-    };
-
-    const buttonConfig = getButtonConfig();
-
-    return (
-      <View style={[
-        styles.busCard,
-        {
-          backgroundColor: colors.card,
-          borderColor: colors.border,
-          ...getThemeShadow(isDark, 'md'),
-        }
-      ]}>
-        <BusCardHeader
-          bus={bus}
-          isStarred={isFavorite(bus.id)}
-          onFavoriteToggle={handleFavoriteToggleLocal}
-        />
-
-        {/* Capacity and Pricing */}
-        <View style={styles.cardContent}>
-          <View style={styles.capacitySection}>
-            <View style={styles.capacityInfo}>
-              <Ionicons name="people" size={20} color={colors.primary} />
-              <Text style={[styles.capacityText, { color: colors.text }]}>
-                {bus.currentRiders?.length || 0}/{bus.maxCapacity || 0} riders
-              </Text>
-            </View>
-            <View style={styles.pricingInfo}>
-              <Text style={[styles.priceText, { color: colors.success }]}>
-                ${bus.pricePerMonth || 0}/month
-              </Text>
-              <Text style={[styles.priceSubtext, { color: colors.textSecondary }]}>
-                ${bus.pricePerRide || 0}/ride
-              </Text>
-            </View>
-          </View>
-
-          {/* Working Days */}
-          <View style={styles.workingDaysSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Working Days</Text>
-            <View style={styles.workingDays}>
-              {getWorkingDaysArray(bus.workingDays).map((day) => (
-                <WorkingDayChip
-                  key={day}
-                  day={day}
-                  isActive={day.isActive}
-                />
-              ))}
-            </View>
-          </View>
-
-          {/* Operating Hours */}
-          <View style={styles.operatingHours}>
-            <Ionicons name="time" size={16} color={colors.textSecondary} />
-            <Text style={[styles.operatingText, { color: colors.textSecondary }]}>
-              {bus.operatingTimeFrom || '--:--'} - {bus.operatingTimeTo || '--:--'}
-            </Text>
-          </View>
-
-          {/* Route */}
-          <View style={styles.routeSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Route</Text>
-            <Text style={[styles.routeText, { color: colors.textSecondary }]}>
-              {getRouteText(bus.locations)}
-            </Text>
-            
-            <View style={styles.stopsContainer}>
-              {bus.locations?.slice(0, 3).map((location, index) => (
-                <LocationStop
-                  key={`${location.placeId}-${index}`}
-                  location={location}
-                  index={index}
-                  isFirst={index === 0}
-                  isLast={index === bus.locations.length - 1}
-                  showLine={index < bus.locations.length - 1}
-                />
-              ))}
-              {bus.locations?.length > 3 && (
-                <Text style={[styles.moreStops, { color: colors.textTertiary }]}>
-                  +{bus.locations.length - 3} more stops
-                </Text>
-              )}
-            </View>
-          </View>
-
-          {/* Updated Subscription Button */}
-          <TouchableOpacity
-            style={[
-              styles.subscribeButton,
-              {
-                backgroundColor: buttonConfig.backgroundColor,
-                borderColor: buttonConfig.borderColor,
-              }
-            ]}
-            onPress={handleSubscribe}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={buttonConfig.icon}
-              size={20}
-              color={colors.textInverse}
-            />
-            <Text style={[styles.subscribeButtonText, { color: colors.textInverse }]}>
-              {buttonConfig.text}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }, [
-    subscriptionStates,
-    isFavorite,
-    handleFavoriteToggle,
-    userData,
-    colors,
-    isDark,
-    handleUnsubscribe,
-    handleResubscribeUnpaid // ✅ NEW dependency
-  ]);
-
-  // Memoized header stats
-  const headerStats = useMemo(() => ({
-    totalRoutes: buses.length,
-    totalRiders: buses.reduce((sum, bus) => sum + (bus.currentRiders?.length || 0), 0)
-  }), [buses]);
-
-  const keyExtractor = useCallback((item: Bus) => item.id, []);
-
-  const getItemLayout = useCallback((data: any, index: number) => ({
-    length: 400, // Approximate height of each card
-    offset: 400 * index,
-    index,
-  }), []);
+      
+      // Default: Not subscribed
+      return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
+      
+    } catch (error) {
+      console.error('Error checking subscription:', error);
+      return { isSubscribed: false, canResubscribe: true, subscriptionType: 'none' };
+    }
+  }, [userData?.uid]);
 
   if (loading) {
     return (
@@ -828,10 +965,25 @@ export const AllBusesScreen: React.FC = () => {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.backgroundSecondary, borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>All Buses</Text>
-        <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-          {buses.length} buses available
-        </Text>
+        <View style={styles.headerTop}>
+          <View style={styles.headerInfo}>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>All Buses</Text>
+            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
+              {searchQuery ? `${filteredBuses.length} of ${buses.length}` : `${buses.length} buses available`}
+            </Text>
+          </View>
+          
+          <TouchableOpacity
+            style={[styles.searchToggle, { backgroundColor: colors.primary }]}
+            onPress={toggleSearch}
+          >
+            <Ionicons 
+              name={showSearch ? "close" : "search"} 
+              size={20} 
+              color={colors.textInverse} 
+            />
+          </TouchableOpacity>
+        </View>
         
         {/* Debug Refresh Button (Development only) */}
         {__DEV__ && (
@@ -845,6 +997,26 @@ export const AllBusesScreen: React.FC = () => {
         )}
       </View>
 
+      {/* ✅ FIXED: Search Bar with stable props */}
+      {showSearch && (
+        <SearchBar
+          searchQuery={searchQuery}
+          onSearchChange={handleSearchChange}
+          onClear={handleClearSearch}
+          colors={colors}
+          isDark={isDark}
+        />
+      )}
+      
+      {/* ✅ FIXED: Search Results with stable props */}
+      {showSearch && (
+        <SearchResults
+          searchQuery={searchQuery}
+          resultsCount={filteredBuses.length}
+          colors={colors}
+        />
+      )}
+
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -852,7 +1024,7 @@ export const AllBusesScreen: React.FC = () => {
         </View>
       ) : (
         <FlatList
-          data={buses}
+          data={filteredBuses}
           renderItem={({ item }) => renderBusCard(item)}
           keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContainer}
@@ -864,6 +1036,27 @@ export const AllBusesScreen: React.FC = () => {
               colors={[colors.primary]}
               tintColor={colors.primary}
             />
+          }
+          ListEmptyComponent={
+            searchQuery ? (
+              <View style={styles.emptySearchContainer}>
+                <Ionicons name="search" size={64} color={colors.textTertiary} />
+                <Text style={[styles.emptySearchTitle, { color: colors.text }]}>
+                  No buses found
+                </Text>
+                <Text style={[styles.emptySearchSubtitle, { color: colors.textSecondary }]}>
+                  Try adjusting your search terms or browse all available buses
+                </Text>
+                <TouchableOpacity
+                  style={[styles.clearSearchButton, { backgroundColor: colors.primary }]}
+                  onPress={handleClearSearch}
+                >
+                  <Text style={[styles.clearSearchButtonText, { color: colors.textInverse }]}>
+                    Clear Search
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null
           }
         />
       )}
@@ -878,7 +1071,7 @@ export const AllBusesScreen: React.FC = () => {
   );
 };
 
-// Updated styles to be theme-agnostic (colors are applied dynamically)
+// ✅ UPDATED: Add new styles for search functionality
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -888,6 +1081,14 @@ const styles = StyleSheet.create({
     paddingVertical: AppSpacing.md,
     borderBottomWidth: 1,
   },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerInfo: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: AppFontSizes.xxl,
     fontWeight: 'bold',
@@ -895,6 +1096,80 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     fontSize: AppFontSizes.md,
+  },
+  searchToggle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: AppSpacing.md,
+  },
+  searchContainer: {
+    paddingHorizontal: AppSpacing.lg,
+    paddingVertical: AppSpacing.md,
+    borderBottomWidth: 1,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: AppBorderRadius.lg,
+    borderWidth: 1,
+    paddingHorizontal: AppSpacing.md,
+    height: 48,
+  },
+  searchIcon: {
+    marginRight: AppSpacing.sm,
+  },
+  searchInput: {
+    fontSize: AppFontSizes.md,
+    paddingVertical: AppSpacing.sm,
+  },
+  clearButton: {
+    padding: AppSpacing.xs,
+    marginLeft: AppSpacing.sm,
+  },
+  searchResults: {
+    paddingHorizontal: AppSpacing.lg,
+    paddingVertical: AppSpacing.sm,
+  },
+  searchResultsText: {
+    fontSize: AppFontSizes.sm,
+    fontWeight: '500',
+  },
+  searchSuggestion: {
+    fontSize: AppFontSizes.sm,
+    marginTop: AppSpacing.xs,
+    fontStyle: 'italic',
+  },
+  emptySearchContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: AppSpacing.xxl,
+    paddingHorizontal: AppSpacing.lg,
+  },
+  emptySearchTitle: {
+    fontSize: AppFontSizes.xl,
+    fontWeight: 'bold',
+    marginTop: AppSpacing.lg,
+    marginBottom: AppSpacing.sm,
+    textAlign: 'center',
+  },
+  emptySearchSubtitle: {
+    fontSize: AppFontSizes.md,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: AppSpacing.lg,
+  },
+  clearSearchButton: {
+    paddingHorizontal: AppSpacing.lg,
+    paddingVertical: AppSpacing.md,
+    borderRadius: AppBorderRadius.md,
+  },
+  clearSearchButtonText: {
+    fontSize: AppFontSizes.md,
+    fontWeight: '600',
   },
   debugButton: {
     flexDirection: 'row',
